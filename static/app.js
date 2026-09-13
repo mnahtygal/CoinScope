@@ -96,7 +96,8 @@ async function loadCollectionSummary(){
   const s=await fetch('/api/collection-summary').then(r=>r.json());
   $('collection-value').textContent=`$${s.value_low.toFixed(2)}–$${s.value_high.toFixed(2)}`;
   $('tube-summary').innerHTML=s.tubes.length?s.tubes.map(t=>`<div class="tube-card"><b>${t.label} Tube ${String(t.tube_number).padStart(3,'0')}</b><span>${t.count}/${t.capacity}</span><progress value="${t.count}" max="${t.capacity}"></progress><small>$${t.value_low.toFixed(2)}–$${t.value_high.toFixed(2)}</small></div>`).join(''):'<p>No filled tube positions yet.</p>';
-  $('hold-summary').textContent=s.hold_count?`⚠ ${s.hold_count} coin${s.hold_count===1?'':'s'} held out for inspection • ${s.priced_count}/${s.coin_count} saved coins priced`: `${s.priced_count}/${s.coin_count} saved coins priced`;
+  const coverage=`${s.priced_count} collector-priced${s.face_value_count?` • ${s.face_value_count} at face value`:''}`;
+  $('hold-summary').textContent=s.hold_count?`⚠ ${s.hold_count} coin${s.hold_count===1?'':'s'} held out for inspection • ${coverage}`:coverage;
 }
 
 $('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save; $('analyze').onclick=analyze; $('detect-date').onclick=identifyCoin;
