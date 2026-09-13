@@ -52,7 +52,7 @@ async function identifyCoin(){
     if(!response.ok||!result.ok){$('detect-status').textContent=result.message||'Detection failed.';return;}
     $('denomination').value=result.denomination; $('year').value=result.year; $('mint_mark').value=result.mint_mark;
     const dc=Math.round(result.denomination_confidence*100), yc=Math.round(result.year_confidence*100), mc=Math.round(result.mint_confidence*100);
-    $('detect-status').textContent=`${result.coin_series||'Coin'} • ${result.denomination} • ${result.year}${result.mint_mark?'-'+result.mint_mark:''} • confidence ${dc}/${yc}/${mc}%`;
+    $('detect-status').textContent=`${result.coin_series||'Coin'}${result.coin_variant?' • '+result.coin_variant:''} • ${result.denomination} • ${result.year}${result.mint_mark?'-'+result.mint_mark:''} • confidence ${dc}/${yc}/${mc}%`;
   } finally {$('detect-date').disabled=false;}
 }
 
@@ -87,7 +87,7 @@ async function save() {
 
 async function loadHistory(){
   const {scans}=await fetch('/api/scans').then(r=>r.json()); $('count').textContent=`${scans.length} coin${scans.length===1?'':'s'}`;
-  const capacities={'1c':50,'5c':40,'10c':50,'25c':40,'50c':20,'Silver Dollar':20}; const labels={'1c':'1C','5c':'5C','10c':'10C','25c':'25C','50c':'50C','Silver Dollar':'DOLLAR'};
+  const capacities={'1c':50,'5c':40,'10c':50,'25c':40,'50c':20,'1 Dollar':20,'Silver Dollar':20}; const labels={'1c':'1C','5c':'5C','10c':'10C','25c':'25C','50c':'50C','1 Dollar':'DOLLAR','Silver Dollar':'DOLLAR'};
   $('history').innerHTML=scans.length?scans.map(s=>`<div class="history-item${s.storage_status==='hold'?' hold-item':''}">${s.obverse?`<img src="/captures/${s.obverse}">`:'<div class="history-placeholder">◉</div>'}<div><b>${[s.year,s.denomination].filter(Boolean).join(' ')||`Scan #${s.id}`}</b><small>${s.country||'Identification pending'}</small>${s.storage_status==='hold'?`<small class="hold-label">⚠ HOLD — DO NOT TUBE</small>`:s.tube_number?`<small>${labels[s.denomination]||s.denomination.toUpperCase()} Tube ${String(s.tube_number).padStart(3,'0')} • ${String(s.tube_position).padStart(2,'0')}/${capacities[s.denomination]||'?'}</small>`:''}<small>${new Date(s.created_at).toLocaleString()}</small></div></div>`).join(''):'<p>No saved coins yet. Put one under the microscope and start scanning.</p>';
   await loadCollectionSummary();
 }
