@@ -20,11 +20,12 @@ DATA = ROOT / "data"
 CAPTURES = DATA / "captures"
 DB = DATA / "coinscope.db"
 CATALOG = ROOT / "catalog" / "us_coins.json"
+NONCENT_CATALOG = ROOT / "catalog" / "us_noncent.json"
 VISION_URL = "http://127.0.0.1:8081/v1/chat/completions"
 HOLD_VALUE_THRESHOLD = 5.00
-TUBE_CAPACITIES = {'1c': 50, '5c': 40, '10c': 50, '25c': 40, '50c': 20, 'Silver Dollar': 20}
-TUBE_LABELS = {'1c': '1C', '5c': '5C', '10c': '10C', '25c': '25C', '50c': '50C', 'Silver Dollar': 'DOLLAR'}
-FACE_VALUES = {'1c': 0.01, '5c': 0.05, '10c': 0.10, '25c': 0.25, '50c': 0.50, 'Silver Dollar': 1.00}
+TUBE_CAPACITIES = {'1c': 50, '5c': 40, '10c': 50, '25c': 40, '50c': 20, '1 Dollar': 20, 'Silver Dollar': 20}
+TUBE_LABELS = {'1c': '1C', '5c': '5C', '10c': '10C', '25c': '25C', '50c': '50C', '1 Dollar': 'DOLLAR', 'Silver Dollar': 'DOLLAR'}
+FACE_VALUES = {'1c': 0.01, '5c': 0.05, '10c': 0.10, '25c': 0.25, '50c': 0.50, '1 Dollar': 1.00, 'Silver Dollar': 1.00}
 DATA.mkdir(exist_ok=True)
 CAPTURES.mkdir(exist_ok=True)
 
@@ -60,6 +61,7 @@ def init_db() -> None:
         columns = {row[1] for row in connection.execute('PRAGMA table_info(scans)')}
         for name, definition in {
             'coin_series': "TEXT DEFAULT ''",
+            'coin_variant': "TEXT DEFAULT ''",
             'tube_number': 'INTEGER',
             'tube_position': 'INTEGER',
             'grade_confidence': 'REAL',
@@ -89,6 +91,24 @@ def analyze_record(payload: dict) -> dict:
             ),
         }
     matches = [r for r in catalog['records'] if r['country'] == 'USA' and r['denomination'] == denomination and r['year'] == year and r['mint_mark'] == mint_mark]
+    if not matches and denomination != '1c' and NONCENT_CATALOG.exists():
+        noncent = json.loads(NONCENT_CATALOG.read_text(encoding='utf-8'))
+        rules = [r for r in noncent['rules'] if r['denomination'] == denomination and r['year_start'] <= year <= r['year_end'] and year not in r.get('excluded_years', []) and mint_mark in r['mint_marks']]
+        if rules:
+            detected_series = str(payload.get('coin_series', '')).lower()
+            ignored = {'coin', 'united', 'states', 'the', 'reverse', 'dollar'}
+            wanted = set(re.findall(r'[a-z]+', detected_series)) - ignored
+            selected = max(rules, key=lambda item: len(wanted & (set(re.findall(r'[a-z]+', item['series'].lower())) - ignored))) if wanted else rules[0]
+            mint_name = {'':'Philadelphia','P':'Philadelphia','D':'Denver','S':'San Francisco','O':'New Orleans','CC':'Carson City','W':'West Point'}.get(mint_mark, mint_mark)
+            suffix = f'-{mint_mark}' if mint_mark else ''
+            detected_variant = str(payload.get('coin_variant', '')).lower()
+            issue_alerts = [a for a in noncent.get('alerts', []) if a['denomination'] == denomination and a['year'] == year and a['mint_mark'] == mint_mark and (not a.get('series') or a['series'].lower() in selected['series'].lower()) and (not a.get('variant') or a['variant'].lower() in detected_variant)]
+            price_override = next((a.get('prices') for a in issue_alerts if a.get('prices')), None)
+            if price_override:
+                selected = {**selected, 'prices': price_override,
+                            'price_source': 'CoinScope key-date screening range informed by PCGS Price Guide'}
+            matches = [{**selected, 'year': year, 'mint_mark': mint_mark, 'mint': mint_name,
+                        'name': f"{year}{suffix} {selected['series']}", 'checks': issue_alerts}]
     if not matches:
         return {'matched': False, 'message': f'{year} {denomination} {mint_mark}'.strip() + ' is not curated yet. The scan remains safely saved.'}
     detected_series = str(payload.get('coin_series', '')).lower()
@@ -110,7 +130,7 @@ def detect_year_and_mint(image_path: Path) -> dict:
     encoded = base64.b64encode(image_path.read_bytes()).decode('ascii')
     prompt = (
         'Examine this United States coin obverse. Read only the visible four-digit mint year '
-        'and mint mark near the date. Mint mark must be D, S, P, or blank. Do not infer from '
+        'and mint mark near the date. Mint mark must be P, D, S, O, CC, W, or blank. Do not infer from '
         'rarity or coin history. Return only compact JSON with keys year, mint_mark, '
         'year_confidence, and mint_confidence.'
     )
@@ -137,7 +157,7 @@ def detect_year_and_mint(image_path: Path) -> dict:
         detected = json.loads(match.group(0))
         year = int(detected['year'])
         mint = str(detected.get('mint_mark', '')).strip().upper()
-        if year < 1792 or year > datetime.now().year + 1 or mint not in {'', 'P', 'D', 'S'}:
+        if year < 1792 or year > datetime.now().year + 1 or mint not in {'', 'P', 'D', 'S', 'O', 'CC', 'W'}:
             raise ValueError('invalid year or mint mark')
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return {'ok': False, 'message': 'Gemma returned an invalid year or mint mark.'}
@@ -156,9 +176,9 @@ def identify_coin(obverse_path: Path, reverse_path: Path) -> dict:
     prompt = (
         'These are the obverse and reverse of the same United States coin. Read only what is '
         'visible in the images. Identify the denomination, four-digit year, mint mark, and coin '
-        'series. Denomination must be exactly one of: 1c, 5c, 10c, 25c, 50c, Silver Dollar. '
-        'Mint mark must be D, S, P, or blank. Return only compact JSON with keys denomination, '
-        'year, mint_mark, coin_series, denomination_confidence, year_confidence, mint_confidence.'
+        'series and visible subtype or reverse design. Denomination must be exactly one of: 1c, 5c, 10c, 25c, 50c, 1 Dollar. '
+        'Mint mark must be P, D, S, O, CC, W, or blank. Return only compact JSON with keys denomination, '
+        'year, mint_mark, coin_series, coin_variant, denomination_confidence, year_confidence, mint_confidence.'
     )
     body = json.dumps({
         'model': 'ggml-org/gemma-3-4b-it-qat-GGUF',
@@ -185,16 +205,17 @@ def identify_coin(obverse_path: Path, reverse_path: Path) -> dict:
         year = int(detected['year'])
         mint = str(detected.get('mint_mark', '')).strip().upper()
         denomination = str(detected['denomination']).strip()
-        valid_denominations = {'1c', '5c', '10c', '25c', '50c', 'Silver Dollar'}
+        valid_denominations = {'1c', '5c', '10c', '25c', '50c', '1 Dollar'}
         if year < 1792 or year > datetime.now().year + 1:
             raise ValueError('invalid year')
-        if mint not in {'', 'P', 'D', 'S'} or denomination not in valid_denominations:
+        if mint not in {'', 'P', 'D', 'S', 'O', 'CC', 'W'} or denomination not in valid_denominations:
             raise ValueError('invalid denomination or mint mark')
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return {'ok': False, 'message': 'Gemma returned invalid coin identification data.'}
     return {
         'ok': True, 'denomination': denomination, 'year': year, 'mint_mark': mint,
         'coin_series': str(detected.get('coin_series', '')).strip(),
+        'coin_variant': str(detected.get('coin_variant', '')).strip(),
         'denomination_confidence': float(detected.get('denomination_confidence', 0)),
         'year_confidence': float(detected.get('year_confidence', 0)),
         'mint_confidence': float(detected.get('mint_confidence', 0)),
@@ -385,7 +406,7 @@ def update_scan(scan_id: int):
     fields = ['country', 'denomination', 'year', 'mint_mark', 'notes', 'status', 'grade']
     values = [str(payload.get(field, '')) for field in fields]
     with db() as connection:
-        existing = connection.execute('SELECT coin_series, tube_number, tube_position FROM scans WHERE id=?', (scan_id,)).fetchone()
+        existing = connection.execute('SELECT coin_series, coin_variant, tube_number, tube_position FROM scans WHERE id=?', (scan_id,)).fetchone()
         if not existing:
             return jsonify({'error': 'Scan not found'}), 404
         connection.execute(
@@ -396,7 +417,7 @@ def update_scan(scan_id: int):
         analysis = None
         denomination = str(payload.get('denomination', '')).strip()
         if payload.get('status') == 'saved' and denomination in TUBE_CAPACITIES:
-            analysis_payload = {**payload, 'coin_series': existing['coin_series'] or ''}
+            analysis_payload = {**payload, 'coin_series': existing['coin_series'] or '', 'coin_variant': existing['coin_variant'] or ''}
             analysis = analyze_record(analysis_payload)
             critical_checks = [c for c in analysis.get('date_specific_checks', []) if c.get('severity') == 'critical'] if analysis.get('matched') else []
             high_value = analysis.get('matched') and float(analysis.get('value_high', 0)) >= HOLD_VALUE_THRESHOLD
@@ -437,9 +458,10 @@ def update_scan(scan_id: int):
 def analyze_scan(scan_id: int):
     payload = request.json or {}
     with db() as connection:
-        scan = connection.execute('SELECT coin_series FROM scans WHERE id=?', (scan_id,)).fetchone()
+        scan = connection.execute('SELECT coin_series, coin_variant FROM scans WHERE id=?', (scan_id,)).fetchone()
     if scan and scan['coin_series']:
         payload['coin_series'] = scan['coin_series']
+        payload['coin_variant'] = scan['coin_variant'] or ''
     result = analyze_record(payload)
     with db() as connection:
         connection.execute('UPDATE scans SET analysis_json=?, grade=? WHERE id=?', (json.dumps(result), str(payload.get('grade', 'VF')), scan_id))
@@ -475,8 +497,8 @@ def identify_scan(scan_id: int):
     if result['ok']:
         with db() as connection:
             connection.execute(
-                'UPDATE scans SET denomination=?, year=?, mint_mark=?, coin_series=? WHERE id=?',
-                (result['denomination'], str(result['year']), result['mint_mark'], result['coin_series'], scan_id),
+                'UPDATE scans SET denomination=?, year=?, mint_mark=?, coin_series=?, coin_variant=? WHERE id=?',
+                (result['denomination'], str(result['year']), result['mint_mark'], result['coin_series'], result['coin_variant'], scan_id),
             )
     return jsonify(result), 200 if result['ok'] else 503
 
@@ -514,12 +536,18 @@ def collection_summary():
     tubes = {}
     total_low = total_high = 0.0
     priced_count = face_value_count = hold_count = 0
+    refreshed_analyses = []
     for row in rows:
         item = dict(row)
         try:
             analysis = json.loads(item.get('analysis_json') or '{}')
         except json.JSONDecodeError:
             analysis = {}
+        if not analysis.get('matched') and item.get('year') and item.get('denomination'):
+            refreshed = analyze_record(item)
+            if refreshed.get('matched'):
+                analysis = refreshed
+                refreshed_analyses.append((json.dumps(refreshed), item['id']))
         if analysis.get('matched'):
             coin_low = float(analysis.get('value_low', 0))
             coin_high = float(analysis.get('value_high', 0))
@@ -542,6 +570,9 @@ def collection_summary():
             tube['count'] += 1
             tube['value_low'] += coin_low
             tube['value_high'] += coin_high
+    if refreshed_analyses:
+        with db() as connection:
+            connection.executemany('UPDATE scans SET analysis_json=? WHERE id=?', refreshed_analyses)
     return jsonify({
         'coin_count': len(rows), 'priced_count': priced_count, 'face_value_count': face_value_count,
         'hold_count': hold_count,
