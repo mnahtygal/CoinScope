@@ -219,6 +219,47 @@
           "source_url": "https://www.pcgs.com/coinfacts/coin/1958-d-1c-rd/2851"
         }
       ]
+    },
+    {
+      "country": "USA",
+      "denomination": "1c",
+      "year": 1951,
+      "mint_mark": "D",
+      "name": "1951-D Lincoln Wheat Cent",
+      "series": "Lincoln Cent, Wheat Reverse",
+      "mint": "Denver",
+      "composition": "95% copper, 5% tin and zinc",
+      "weight_g": 3.11,
+      "diameter_mm": 19.0,
+      "mintage": 625355000,
+      "magnetic": false,
+      "source_url": "https://www.pcgs.com/coinfacts/coin/1951-d-1c-bn/2788",
+      "price_source": "CoinScope conservative collector baseline",
+      "price_updated": "2026-09-13",
+      "prices": {
+        "G": [0.05, 0.15],
+        "F": [0.10, 0.30],
+        "VF": [0.15, 0.50],
+        "XF": [0.25, 0.75],
+        "AU": [0.50, 1.50],
+        "MS": [2.00, 20.00]
+      },
+      "checks": [
+        {
+          "name": "1951-D/S over-mintmark",
+          "severity": "warning",
+          "instruction": "Inspect the D mint mark under magnification for traces of an underlying S. Do not assign the variety from a normal D alone; professional attribution is recommended.",
+          "potential": "Recognized FS-512 variety",
+          "source_url": "https://www.pcgs.com/coinfacts/coin/1951-d-1c-omm-fs-512-bn/37952"
+        },
+        {
+          "name": "Original surfaces",
+          "severity": "info",
+          "instruction": "Do not clean the coin. Original color and problem-free surfaces matter more than brightness.",
+          "potential": "Condition-dependent premium",
+          "source_url": "https://www.pcgs.com/coinfacts/coin/1951-d-1c-bn/2788"
+        }
+      ]
     }
   ]
 }
