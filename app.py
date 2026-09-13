@@ -53,6 +53,14 @@ def init_db() -> None:
         for name, definition in {'grade': "TEXT DEFAULT 'VF'", 'analysis_json': "TEXT DEFAULT ''"}.items():
             if name not in columns:
                 connection.execute(f'ALTER TABLE scans ADD COLUMN {name} {definition}')
+        columns = {row[1] for row in connection.execute('PRAGMA table_info(scans)')}
+        for name, definition in {
+            'coin_series': "TEXT DEFAULT ''",
+            'tube_number': 'INTEGER',
+            'tube_position': 'INTEGER',
+        }.items():
+            if name not in columns:
+                connection.execute(f'ALTER TABLE scans ADD COLUMN {name} {definition}')
 
 
 def analyze_record(payload: dict) -> dict:
@@ -111,6 +119,59 @@ def detect_year_and_mint(image_path: Path) -> dict:
         return {'ok': False, 'message': 'Gemma returned an invalid year or mint mark.'}
     return {
         'ok': True, 'year': year, 'mint_mark': mint,
+        'year_confidence': float(detected.get('year_confidence', 0)),
+        'mint_confidence': float(detected.get('mint_confidence', 0)),
+    }
+
+
+def identify_coin(obverse_path: Path, reverse_path: Path) -> dict:
+    def data_url(path: Path) -> str:
+        encoded = base64.b64encode(path.read_bytes()).decode('ascii')
+        return f'data:image/jpeg;base64,{encoded}'
+
+    prompt = (
+        'These are the obverse and reverse of the same United States coin. Read only what is '
+        'visible in the images. Identify the denomination, four-digit year, mint mark, and coin '
+        'series. Denomination must be exactly one of: 1c, 5c, 10c, 25c, 50c, Silver Dollar. '
+        'Mint mark must be D, S, P, or blank. Return only compact JSON with keys denomination, '
+        'year, mint_mark, coin_series, denomination_confidence, year_confidence, mint_confidence.'
+    )
+    body = json.dumps({
+        'model': 'ggml-org/gemma-3-4b-it-qat-GGUF',
+        'temperature': 0,
+        'max_tokens': 180,
+        'messages': [{'role': 'user', 'content': [
+            {'type': 'text', 'text': prompt},
+            {'type': 'image_url', 'image_url': {'url': data_url(obverse_path)}},
+            {'type': 'image_url', 'image_url': {'url': data_url(reverse_path)}},
+        ]}],
+    }).encode('utf-8')
+    request_data = Request(VISION_URL, data=body, headers={'Content-Type': 'application/json'})
+    try:
+        with urlopen(request_data, timeout=120) as response:
+            api_result = json.loads(response.read())
+    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {'ok': False, 'message': f'Local Gemma vision is unavailable: {error}'}
+    content = api_result.get('choices', [{}])[0].get('message', {}).get('content', '')
+    match = re.search(r'\{.*\}', content, re.DOTALL)
+    if not match:
+        return {'ok': False, 'message': 'Gemma did not return readable coin JSON.'}
+    try:
+        detected = json.loads(match.group(0))
+        year = int(detected['year'])
+        mint = str(detected.get('mint_mark', '')).strip().upper()
+        denomination = str(detected['denomination']).strip()
+        valid_denominations = {'1c', '5c', '10c', '25c', '50c', 'Silver Dollar'}
+        if year < 1792 or year > datetime.now().year + 1:
+            raise ValueError('invalid year')
+        if mint not in {'', 'P', 'D', 'S'} or denomination not in valid_denominations:
+            raise ValueError('invalid denomination or mint mark')
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {'ok': False, 'message': 'Gemma returned invalid coin identification data.'}
+    return {
+        'ok': True, 'denomination': denomination, 'year': year, 'mint_mark': mint,
+        'coin_series': str(detected.get('coin_series', '')).strip(),
+        'denomination_confidence': float(detected.get('denomination_confidence', 0)),
         'year_confidence': float(detected.get('year_confidence', 0)),
         'mint_confidence': float(detected.get('mint_confidence', 0)),
     }
@@ -263,7 +324,15 @@ def update_scan(scan_id: int):
             'UPDATE scans SET country=?, denomination=?, year=?, mint_mark=?, notes=?, status=?, grade=? WHERE id=?',
             (*values, scan_id),
         )
-    return jsonify({'ok': True})
+        location = connection.execute('SELECT tube_number, tube_position FROM scans WHERE id=?', (scan_id,)).fetchone()
+        if payload.get('status') == 'saved' and payload.get('denomination') == '1c' and location and location['tube_number'] is None:
+            last = connection.execute("SELECT MAX((tube_number - 1) * 50 + tube_position) FROM scans WHERE denomination='1c'").fetchone()[0] or 0
+            sequence = last + 1
+            tube_number = ((sequence - 1) // 50) + 1
+            tube_position = ((sequence - 1) % 50) + 1
+            connection.execute('UPDATE scans SET tube_number=?, tube_position=? WHERE id=?', (tube_number, tube_position, scan_id))
+            location = {'tube_number': tube_number, 'tube_position': tube_position}
+    return jsonify({'ok': True, 'location': dict(location) if location else None})
 
 
 @app.post('/api/scans/<int:scan_id>/analyze')
@@ -288,6 +357,25 @@ def detect_scan_date(scan_id: int):
     if result['ok']:
         with db() as connection:
             connection.execute('UPDATE scans SET year=?, mint_mark=? WHERE id=?', (str(result['year']), result['mint_mark'], scan_id))
+    return jsonify(result), 200 if result['ok'] else 503
+
+
+@app.post('/api/scans/<int:scan_id>/identify')
+def identify_scan(scan_id: int):
+    with db() as connection:
+        scan = connection.execute('SELECT obverse, reverse FROM scans WHERE id=?', (scan_id,)).fetchone()
+    if not scan or not scan['obverse'] or not scan['reverse']:
+        return jsonify({'ok': False, 'message': 'Capture both front and back first.'}), 400
+    obverse_path, reverse_path = CAPTURES / scan['obverse'], CAPTURES / scan['reverse']
+    if not obverse_path.is_file() or not reverse_path.is_file():
+        return jsonify({'ok': False, 'message': 'One or both scan images are missing.'}), 404
+    result = identify_coin(obverse_path, reverse_path)
+    if result['ok']:
+        with db() as connection:
+            connection.execute(
+                'UPDATE scans SET denomination=?, year=?, mint_mark=?, coin_series=? WHERE id=?',
+                (result['denomination'], str(result['year']), result['mint_mark'], result['coin_series'], scan_id),
+            )
     return jsonify(result), 200 if result['ok'] else 503
 
 
