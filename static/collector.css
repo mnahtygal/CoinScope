@@ -3,3 +3,4 @@
 .value{font:700 25px Georgia,serif;color:var(--gold);margin-top:10px}.value small{font:12px Inter,sans-serif;color:var(--muted);text-transform:uppercase}.source{font-size:11px!important}
 .checks{padding-left:18px;margin:7px 0}.checks li{margin:8px 0;line-height:1.35}.checks li small{display:block;color:var(--gold)}.checks .critical{color:#ffcf70}.checks .warning{color:#f2df9b}
 .detect-button{width:100%;margin:4px 0 0;background:#26372f;color:var(--text)}.detect-button:disabled{opacity:.55;cursor:wait}.detect-status{min-height:22px;padding:5px 2px;color:var(--green);font-size:12px}
+.hold-item{border:1px solid var(--gold);background:#211b0d!important}.hold-label{color:var(--gold)!important;font-weight:800}
