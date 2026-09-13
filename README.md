@@ -40,7 +40,7 @@ python3 tests/test_noncent_catalog.py
 - Reports a focus/sharpness score after each capture.
 - Stores country, denomination, year, mint mark, and notes.
 - Uses local Gemma vision to estimate a conservative screening grade after both sides are captured.
-- Sends coins with a $5+ estimated upper range or a critical date-specific alert to HOLD instead of assigning a tube position.
+- Sends cents with an estimated upper range over $1, other coins with a $5+ upper range, or any coin with a critical date-specific alert to HOLD instead of assigning a tube position.
 - Saves images and collection records locally in `data/` using SQLite.
 - Responsive dark interface designed for a desktop monitor or touchscreen.
 
