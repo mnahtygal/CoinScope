@@ -85,6 +85,10 @@ def analyze_record(payload: dict) -> dict:
         return {'matched': False, 'message': 'Enter a valid four-digit U.S. coin year.'}
     denomination = str(payload.get('denomination', '')).strip()
     mint_mark = str(payload.get('mint_mark', '')).strip().upper()
+    # Philadelphia cents normally carry no mint mark. The 2017-P cent is the
+    # sole circulating exception, so normalize vision's inferred P elsewhere.
+    if denomination == '1c' and mint_mark == 'P' and year != 2017:
+        mint_mark = ''
     if denomination == '1c' and year == 2026:
         return {
             'matched': False,
@@ -225,6 +229,8 @@ def identify_coin(obverse_path: Path, reverse_path: Path, denomination_hint: str
             denomination = denomination_hint
         elif evidence_denomination:
             denomination = evidence_denomination
+        if denomination == '1c' and mint == 'P' and year != 2017:
+            mint = ''
         if year < 1792 or year > datetime.now().year + 1:
             raise ValueError('invalid year')
         if mint not in {'', 'P', 'D', 'S', 'O', 'CC', 'W'} or denomination not in valid_denominations:
