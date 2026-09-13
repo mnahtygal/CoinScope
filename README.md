@@ -19,6 +19,19 @@ python3 tools/build_cent_catalog.py
 python3 tests/test_cent_catalog.py
 ```
 
+## Nickels through dollar coins
+
+`catalog/us_noncent.json` adds source-dated screening coverage from 1850 through
+2026 for nickels, dimes, quarters, half dollars, and dollar coins. It uses 40
+series rules plus key-date/error overrides so overlapping designs such as Morgan
+and Peace dollars are selected using Gemma's detected series and reverse design.
+Historical `O`, `CC`, and `W` mint marks are supported. Rebuild and validate it:
+
+```bash
+python3 tools/build_noncent_catalog.py
+python3 tests/test_noncent_catalog.py
+```
+
 ## What works now
 
 - Discovers Linux V4L2 cameras (`/dev/video*`) and displays their hardware names.
