@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import atexit
+import base64
 import json
+import re
 import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import cv2
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
@@ -16,6 +20,7 @@ DATA = ROOT / "data"
 CAPTURES = DATA / "captures"
 DB = DATA / "coinscope.db"
 CATALOG = ROOT / "catalog" / "us_coins.json"
+VISION_URL = "http://127.0.0.1:8081/v1/chat/completions"
 DATA.mkdir(exist_ok=True)
 CAPTURES.mkdir(exist_ok=True)
 
@@ -56,6 +61,8 @@ def analyze_record(payload: dict) -> dict:
         year = int(str(payload.get('year', '')).strip())
     except ValueError:
         return {'matched': False, 'message': 'Enter a four-digit year before analysis.'}
+    if year < 1792 or year > datetime.now().year + 1:
+        return {'matched': False, 'message': 'Enter a valid four-digit U.S. coin year.'}
     denomination = str(payload.get('denomination', '')).strip()
     mint_mark = str(payload.get('mint_mark', '')).strip().upper()
     matches = [r for r in catalog['records'] if r['country'] == 'USA' and r['denomination'] == denomination and r['year'] == year and r['mint_mark'] == mint_mark]
@@ -65,6 +72,48 @@ def analyze_record(payload: dict) -> dict:
     grade = str(payload.get('grade', 'VF')).upper()
     low, high = record['prices'].get(grade, record['prices']['VF'])
     return {'matched': True, 'grade': grade, 'value_low': low, 'value_high': high, **record}
+
+
+def detect_year_and_mint(image_path: Path) -> dict:
+    encoded = base64.b64encode(image_path.read_bytes()).decode('ascii')
+    prompt = (
+        'Examine this United States coin obverse. Read only the visible four-digit mint year '
+        'and mint mark near the date. Mint mark must be D, S, P, or blank. Do not infer from '
+        'rarity or coin history. Return only compact JSON with keys year, mint_mark, '
+        'year_confidence, and mint_confidence.'
+    )
+    body = json.dumps({
+        'model': 'ggml-org/gemma-3-4b-it-qat-GGUF',
+        'temperature': 0,
+        'max_tokens': 150,
+        'messages': [{'role': 'user', 'content': [
+            {'type': 'text', 'text': prompt},
+            {'type': 'image_url', 'image_url': {'url': f'data:image/jpeg;base64,{encoded}'}},
+        ]}],
+    }).encode('utf-8')
+    request_data = Request(VISION_URL, data=body, headers={'Content-Type': 'application/json'})
+    try:
+        with urlopen(request_data, timeout=120) as response:
+            api_result = json.loads(response.read())
+    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {'ok': False, 'message': f'Local Gemma vision is unavailable: {error}'}
+    content = api_result.get('choices', [{}])[0].get('message', {}).get('content', '')
+    match = re.search(r'\{.*\}', content, re.DOTALL)
+    if not match:
+        return {'ok': False, 'message': 'Gemma did not return readable year/mint JSON.'}
+    try:
+        detected = json.loads(match.group(0))
+        year = int(detected['year'])
+        mint = str(detected.get('mint_mark', '')).strip().upper()
+        if year < 1792 or year > datetime.now().year + 1 or mint not in {'', 'P', 'D', 'S'}:
+            raise ValueError('invalid year or mint mark')
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {'ok': False, 'message': 'Gemma returned an invalid year or mint mark.'}
+    return {
+        'ok': True, 'year': year, 'mint_mark': mint,
+        'year_confidence': float(detected.get('year_confidence', 0)),
+        'mint_confidence': float(detected.get('mint_confidence', 0)),
+    }
 
 
 class Camera:
@@ -224,6 +273,22 @@ def analyze_scan(scan_id: int):
     with db() as connection:
         connection.execute('UPDATE scans SET analysis_json=?, grade=? WHERE id=?', (json.dumps(result), str(payload.get('grade', 'VF')), scan_id))
     return jsonify(result)
+
+
+@app.post('/api/scans/<int:scan_id>/detect-date')
+def detect_scan_date(scan_id: int):
+    with db() as connection:
+        scan = connection.execute('SELECT obverse FROM scans WHERE id=?', (scan_id,)).fetchone()
+    if not scan or not scan['obverse']:
+        return jsonify({'ok': False, 'message': 'Capture the front/obverse first.'}), 400
+    image_path = CAPTURES / scan['obverse']
+    if not image_path.is_file():
+        return jsonify({'ok': False, 'message': 'The obverse image file is missing.'}), 404
+    result = detect_year_and_mint(image_path)
+    if result['ok']:
+        with db() as connection:
+            connection.execute('UPDATE scans SET year=?, mint_mark=? WHERE id=?', (str(result['year']), result['mint_mark'], scan_id))
+    return jsonify(result), 200 if result['ok'] else 503
 
 
 @app.get('/api/scans')
