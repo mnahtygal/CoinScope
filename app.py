@@ -22,6 +22,8 @@ DB = DATA / "coinscope.db"
 CATALOG = ROOT / "catalog" / "us_coins.json"
 VISION_URL = "http://127.0.0.1:8081/v1/chat/completions"
 HOLD_VALUE_THRESHOLD = 5.00
+TUBE_CAPACITIES = {'1c': 50, '5c': 40, '10c': 50, '25c': 40, '50c': 20, 'Silver Dollar': 20}
+TUBE_LABELS = {'1c': '1C', '5c': '5C', '10c': '10C', '25c': '25C', '50c': '50C', 'Silver Dollar': 'DOLLAR'}
 DATA.mkdir(exist_ok=True)
 CAPTURES.mkdir(exist_ok=True)
 
@@ -391,7 +393,8 @@ def update_scan(scan_id: int):
         )
         storage = {'storage_status': 'unassigned'}
         analysis = None
-        if payload.get('status') == 'saved' and payload.get('denomination') == '1c':
+        denomination = str(payload.get('denomination', '')).strip()
+        if payload.get('status') == 'saved' and denomination in TUBE_CAPACITIES:
             analysis_payload = {**payload, 'coin_series': existing['coin_series'] or ''}
             analysis = analyze_record(analysis_payload)
             critical_checks = [c for c in analysis.get('date_specific_checks', []) if c.get('severity') == 'critical'] if analysis.get('matched') else []
@@ -411,15 +414,21 @@ def update_scan(scan_id: int):
             else:
                 tube_number, tube_position = existing['tube_number'], existing['tube_position']
                 if tube_number is None:
-                    last = connection.execute("SELECT MAX((tube_number - 1) * 50 + tube_position) FROM scans WHERE denomination='1c'").fetchone()[0] or 0
+                    capacity = TUBE_CAPACITIES[denomination]
+                    last = connection.execute(
+                        'SELECT MAX((tube_number - 1) * ? + tube_position) FROM scans WHERE denomination=?',
+                        (capacity, denomination),
+                    ).fetchone()[0] or 0
                     sequence = last + 1
-                    tube_number = ((sequence - 1) // 50) + 1
-                    tube_position = ((sequence - 1) % 50) + 1
+                    tube_number = ((sequence - 1) // capacity) + 1
+                    tube_position = ((sequence - 1) % capacity) + 1
                 connection.execute(
                     "UPDATE scans SET tube_number=?, tube_position=?, storage_status='tube', hold_reason='', analysis_json=? WHERE id=?",
                     (tube_number, tube_position, json.dumps(analysis), scan_id),
                 )
-                storage = {'storage_status': 'tube', 'tube_number': tube_number, 'tube_position': tube_position}
+                storage = {'storage_status': 'tube', 'tube_label': TUBE_LABELS[denomination],
+                           'tube_number': tube_number, 'tube_position': tube_position,
+                           'capacity': TUBE_CAPACITIES[denomination]}
     return jsonify({'ok': True, 'location': storage, 'analysis': analysis})
 
 
@@ -495,6 +504,43 @@ def list_scans():
     with db() as connection:
         rows = connection.execute('SELECT * FROM scans ORDER BY id DESC LIMIT 100').fetchall()
     return jsonify({'scans': [dict(row) for row in rows]})
+
+
+@app.get('/api/collection-summary')
+def collection_summary():
+    with db() as connection:
+        rows = connection.execute("SELECT * FROM scans WHERE status='saved' ORDER BY id").fetchall()
+    tubes = {}
+    total_low = total_high = 0.0
+    priced_count = hold_count = 0
+    for row in rows:
+        item = dict(row)
+        try:
+            analysis = json.loads(item.get('analysis_json') or '{}')
+        except json.JSONDecodeError:
+            analysis = {}
+        if analysis.get('matched'):
+            total_low += float(analysis.get('value_low', 0))
+            total_high += float(analysis.get('value_high', 0))
+            priced_count += 1
+        if item.get('storage_status') == 'hold':
+            hold_count += 1
+        if item.get('tube_number') and item.get('denomination') in TUBE_CAPACITIES:
+            key = (item['denomination'], item['tube_number'])
+            tube = tubes.setdefault(key, {
+                'denomination': item['denomination'], 'label': TUBE_LABELS[item['denomination']],
+                'tube_number': item['tube_number'], 'capacity': TUBE_CAPACITIES[item['denomination']],
+                'count': 0, 'value_low': 0.0, 'value_high': 0.0,
+            })
+            tube['count'] += 1
+            if analysis.get('matched'):
+                tube['value_low'] += float(analysis.get('value_low', 0))
+                tube['value_high'] += float(analysis.get('value_high', 0))
+    return jsonify({
+        'coin_count': len(rows), 'priced_count': priced_count, 'hold_count': hold_count,
+        'value_low': round(total_low, 2), 'value_high': round(total_high, 2),
+        'tubes': list(tubes.values()),
+    })
 
 
 @app.get('/captures/<path:name>')
