@@ -3,8 +3,10 @@ from __future__ import annotations
 import atexit
 import base64
 import json
+import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -21,7 +23,7 @@ CAPTURES = DATA / "captures"
 DB = DATA / "coinscope.db"
 CATALOG = ROOT / "catalog" / "us_coins.json"
 NONCENT_CATALOG = ROOT / "catalog" / "us_noncent.json"
-VISION_URL = "http://127.0.0.1:8081/v1/chat/completions"
+VISION_URL = os.environ.get('COINSCOPE_VISION_URL', 'http://127.0.0.1:8081/v1/chat/completions')
 HOLD_VALUE_THRESHOLD = 5.00
 TUBE_CAPACITIES = {'1c': 50, '5c': 40, '10c': 50, '25c': 40, '50c': 20, '1 Dollar': 20, 'Silver Dollar': 20}
 TUBE_LABELS = {'1c': '1C', '5c': '5C', '10c': '10C', '25c': '25C', '50c': '50C', '1 Dollar': 'DOLLAR', 'Silver Dollar': 'DOLLAR'}
@@ -299,7 +301,8 @@ class Camera:
             if self.index == index and self.capture is not None and self.capture.isOpened():
                 return True
 
-        candidate = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        backend = cv2.CAP_AVFOUNDATION if sys.platform == 'darwin' else cv2.CAP_V4L2
+        candidate = cv2.VideoCapture(index, backend)
         if not candidate.isOpened():
             candidate.release()
             return False
@@ -347,6 +350,14 @@ init_db()
 
 
 def camera_devices() -> list[dict]:
+    if sys.platform == 'darwin':
+        # AVFoundation uses numeric camera indexes rather than /dev/video paths.
+        # Expose a small selectable range; unopened indexes fail harmlessly when selected.
+        return [
+            {'index': index, 'path': f'AVFoundation camera {index}',
+             'name': 'USB Microscope' if index == 0 else f'Mac camera {index}'}
+            for index in range(4)
+        ]
     devices = []
     for path in sorted(Path('/dev').glob('video*')):
         try:
@@ -608,7 +619,7 @@ def captures(name: str):
 if __name__ == '__main__':
     devices_found = camera_devices()
     if devices_found:
-        preferred = next((d for d in devices_found if 'microscope' in d['name'].lower() and d['index'] % 2 == 0), devices_found[0])
+        preferred = next((d for d in devices_found if 'microscope' in d['name'].lower() and (sys.platform == 'darwin' or d['index'] % 2 == 0)), devices_found[0])
         camera.open(preferred['index'])
     print('\nCoinScope is ready: http://127.0.0.1:5050\n')
     app.run(host='127.0.0.1', port=5050, threaded=True)
