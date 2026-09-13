@@ -1,9 +1,6 @@
 let scanId = null;
 const $ = id => document.getElementById(id);
-$('feed').addEventListener('load', () => {
-  setCameraStatus(true, 'Microscope live');
-});
-const fields = ['country','denomination','year','mint_mark','notes'];
+const fields = ['country','denomination','year','mint_mark','notes','grade'];
 
 async function loadDevices() {
   const data = await fetch('/api/devices').then(r => r.json());
@@ -17,9 +14,14 @@ async function loadDevices() {
 
 async function chooseCamera(index) {
   setCameraStatus(false, 'Opening camera…');
-  const data = await fetch('/api/camera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:Number(index)})}).then(r => r.json());
-  setCameraStatus(data.ok, data.ok ? 'Microscope live' : 'Could not open camera');
-  if (data.ok) $('feed').src = `/video?t=${Date.now()}`;
+  try {
+    const response = await fetch('/api/camera', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:Number(index)})});
+    const data = await response.json();
+    setCameraStatus(data.ok, data.ok ? 'Microscope live' : 'Camera is busy — close other camera apps');
+    if (data.ok) $('feed').src = `/video?t=${Date.now()}`;
+  } catch (error) {
+    setCameraStatus(false, 'CoinScope connection lost — restart the app');
+  }
 }
 
 function setCameraStatus(live, text) { $('camera-status').textContent=text; $('camera-status').parentElement.classList.toggle('live',live); $('no-camera').style.display=live?'none':'block'; }
@@ -29,7 +31,16 @@ async function newScan() {
   scanId=data.id; $('scan-id').textContent=`#${scanId}`; $('scan-title').textContent='Capturing coin';
   for(const side of ['obverse','reverse']) { $(side).innerHTML='<b>Not captured</b>'; $(`${side}-quality`).textContent=''; }
   fields.forEach(f=>$(f).value='');
-  $('country').value='USA';
+  $('country').value='USA'; $('grade').value='VF';
+}
+
+async function analyze(){
+  if(!scanId) return alert('Capture a coin first.');
+  const payload=Object.fromEntries(fields.map(f=>[f,$(f).value]));
+  const result=await fetch(`/api/scans/${scanId}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
+  if(!result.matched){$('analysis').innerHTML=`<div class="analysis-icon">?</div><div><h3>Not curated yet</h3><p>${result.message}</p></div>`;return;}
+  const checks=result.checks.map(c=>`<li class="${c.severity}"><b>${c.name}</b> — ${c.instruction}<small>${c.potential}</small></li>`).join('');
+  $('analysis').innerHTML=`<div class="analysis-icon">✦</div><div><h3>${result.name}</h3><p>${result.mint} • ${result.composition} • ${result.weight_g} g • ${result.diameter_mm} mm</p><div class="value">$${result.value_low.toFixed(2)}–$${result.value_high.toFixed(2)} <small>estimated ${result.grade}</small></div><p class="source">${result.price_source} • updated ${result.price_updated}</p><h4>Collector checks</h4><ul class="checks">${checks}</ul><a href="${result.source_url}" target="_blank" rel="noopener">Open reference source</a></div>`;
 }
 
 async function captureSide(side) {
@@ -52,7 +63,6 @@ async function loadHistory(){
   $('history').innerHTML=scans.length?scans.map(s=>`<div class="history-item">${s.obverse?`<img src="/captures/${s.obverse}">`:'<div class="history-placeholder">◉</div>'}<div><b>${[s.year,s.denomination].filter(Boolean).join(' ')||`Scan #${s.id}`}</b><small>${s.country||'Identification pending'}</small><small>${new Date(s.created_at).toLocaleString()}</small></div></div>`).join(''):'<p>No saved coins yet. Put one under the microscope and start scanning.</p>';
 }
 
-$('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save;
+$('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save; $('analyze').onclick=analyze;
 document.querySelectorAll('[data-side]').forEach(b=>b.onclick=()=>captureSide(b.dataset.side));
 loadDevices(); loadHistory();
-
