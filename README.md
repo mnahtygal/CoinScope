@@ -85,3 +85,6 @@ CoinScope deliberately uses Ubuntu/JetPack's system OpenCV package rather than d
 3. Known-variety inspection prompts and marked image regions.
 4. Evidence-backed sold-price lookup with date, grade, and source.
 5. Collection export, backup, and value dashboard.
+# macOS scanner station
+
+On an Apple Silicon Mac with Homebrew installed, use `./run-coinscope-mac.sh`. The launcher installs a Python 3.12 environment and FFmpeg, opens a secure SSH tunnel to Gemma Vision on Thor, and starts CoinScope. macOS will ask for Camera permission the first time; allow Terminal to use the microscope.
