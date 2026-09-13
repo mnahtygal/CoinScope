@@ -21,6 +21,7 @@ CAPTURES = DATA / "captures"
 DB = DATA / "coinscope.db"
 CATALOG = ROOT / "catalog" / "us_coins.json"
 VISION_URL = "http://127.0.0.1:8081/v1/chat/completions"
+HOLD_VALUE_THRESHOLD = 5.00
 DATA.mkdir(exist_ok=True)
 CAPTURES.mkdir(exist_ok=True)
 
@@ -58,6 +59,10 @@ def init_db() -> None:
             'coin_series': "TEXT DEFAULT ''",
             'tube_number': 'INTEGER',
             'tube_position': 'INTEGER',
+            'grade_confidence': 'REAL',
+            'grade_reason': "TEXT DEFAULT ''",
+            'storage_status': "TEXT DEFAULT 'unassigned'",
+            'hold_reason': "TEXT DEFAULT ''",
         }.items():
             if name not in columns:
                 connection.execute(f'ALTER TABLE scans ADD COLUMN {name} {definition}')
@@ -92,8 +97,10 @@ def analyze_record(payload: dict) -> dict:
         record = matches[0]
     grade = str(payload.get('grade', 'VF')).upper()
     low, high = record['prices'].get(grade, record['prices']['VF'])
-    checks = [*record.get('checks', []), *catalog.get('universal_error_checks', [])]
-    return {'matched': True, 'grade': grade, 'value_low': low, 'value_high': high, **record, 'checks': checks}
+    date_checks = record.get('checks', [])
+    checks = [*date_checks, *catalog.get('universal_error_checks', [])]
+    return {'matched': True, 'grade': grade, 'value_low': low, 'value_high': high,
+            **record, 'checks': checks, 'date_specific_checks': date_checks}
 
 
 def detect_year_and_mint(image_path: Path) -> dict:
@@ -189,6 +196,47 @@ def identify_coin(obverse_path: Path, reverse_path: Path) -> dict:
         'year_confidence': float(detected.get('year_confidence', 0)),
         'mint_confidence': float(detected.get('mint_confidence', 0)),
     }
+
+
+def estimate_grade(obverse_path: Path, reverse_path: Path) -> dict:
+    def data_url(path: Path) -> str:
+        encoded = base64.b64encode(path.read_bytes()).decode('ascii')
+        return f'data:image/jpeg;base64,{encoded}'
+
+    prompt = (
+        'Estimate a conservative screening grade for this United States coin from the obverse '
+        'and reverse photographs. Judge visible wear on high points, remaining detail, rims, '
+        'surface damage, and apparent luster. Do not claim professional certification. Grade '
+        'must be exactly one of G, F, VF, XF, AU, or MS. When uncertain choose the lower grade. '
+        'Return only compact JSON with keys grade, confidence, and reason. Keep reason under 140 characters.'
+    )
+    body = json.dumps({
+        'model': 'ggml-org/gemma-3-4b-it-qat-GGUF', 'temperature': 0,
+        'max_tokens': 160,
+        'messages': [{'role': 'user', 'content': [
+            {'type': 'text', 'text': prompt},
+            {'type': 'image_url', 'image_url': {'url': data_url(obverse_path)}},
+            {'type': 'image_url', 'image_url': {'url': data_url(reverse_path)}},
+        ]}],
+    }).encode('utf-8')
+    request_data = Request(VISION_URL, data=body, headers={'Content-Type': 'application/json'})
+    try:
+        with urlopen(request_data, timeout=120) as response:
+            api_result = json.loads(response.read())
+    except (URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {'ok': False, 'message': f'Local Gemma grading is unavailable: {error}'}
+    content = api_result.get('choices', [{}])[0].get('message', {}).get('content', '')
+    match = re.search(r'\{.*\}', content, re.DOTALL)
+    try:
+        detected = json.loads(match.group(0)) if match else {}
+        grade = str(detected['grade']).strip().upper()
+        confidence = max(0.0, min(1.0, float(detected.get('confidence', 0))))
+        reason = str(detected.get('reason', '')).strip()[:140]
+        if grade not in {'G', 'F', 'VF', 'XF', 'AU', 'MS'}:
+            raise ValueError('invalid grade')
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {'ok': False, 'message': 'Gemma returned invalid grading data.'}
+    return {'ok': True, 'grade': grade, 'confidence': confidence, 'reason': reason}
 
 
 class Camera:
@@ -334,19 +382,45 @@ def update_scan(scan_id: int):
     fields = ['country', 'denomination', 'year', 'mint_mark', 'notes', 'status', 'grade']
     values = [str(payload.get(field, '')) for field in fields]
     with db() as connection:
+        existing = connection.execute('SELECT coin_series, tube_number, tube_position FROM scans WHERE id=?', (scan_id,)).fetchone()
+        if not existing:
+            return jsonify({'error': 'Scan not found'}), 404
         connection.execute(
             'UPDATE scans SET country=?, denomination=?, year=?, mint_mark=?, notes=?, status=?, grade=? WHERE id=?',
             (*values, scan_id),
         )
-        location = connection.execute('SELECT tube_number, tube_position FROM scans WHERE id=?', (scan_id,)).fetchone()
-        if payload.get('status') == 'saved' and payload.get('denomination') == '1c' and location and location['tube_number'] is None:
-            last = connection.execute("SELECT MAX((tube_number - 1) * 50 + tube_position) FROM scans WHERE denomination='1c'").fetchone()[0] or 0
-            sequence = last + 1
-            tube_number = ((sequence - 1) // 50) + 1
-            tube_position = ((sequence - 1) % 50) + 1
-            connection.execute('UPDATE scans SET tube_number=?, tube_position=? WHERE id=?', (tube_number, tube_position, scan_id))
-            location = {'tube_number': tube_number, 'tube_position': tube_position}
-    return jsonify({'ok': True, 'location': dict(location) if location else None})
+        storage = {'storage_status': 'unassigned'}
+        analysis = None
+        if payload.get('status') == 'saved' and payload.get('denomination') == '1c':
+            analysis_payload = {**payload, 'coin_series': existing['coin_series'] or ''}
+            analysis = analyze_record(analysis_payload)
+            critical_checks = [c for c in analysis.get('date_specific_checks', []) if c.get('severity') == 'critical'] if analysis.get('matched') else []
+            high_value = analysis.get('matched') and float(analysis.get('value_high', 0)) >= HOLD_VALUE_THRESHOLD
+            if high_value or critical_checks:
+                reasons = []
+                if high_value:
+                    reasons.append(f"estimated {analysis['grade']} range reaches ${analysis['value_high']:.2f}")
+                if critical_checks:
+                    reasons.append('critical date-specific collector check')
+                hold_reason = '; '.join(reasons)
+                connection.execute(
+                    "UPDATE scans SET tube_number=NULL, tube_position=NULL, storage_status='hold', hold_reason=?, analysis_json=? WHERE id=?",
+                    (hold_reason, json.dumps(analysis), scan_id),
+                )
+                storage = {'storage_status': 'hold', 'hold_reason': hold_reason}
+            else:
+                tube_number, tube_position = existing['tube_number'], existing['tube_position']
+                if tube_number is None:
+                    last = connection.execute("SELECT MAX((tube_number - 1) * 50 + tube_position) FROM scans WHERE denomination='1c'").fetchone()[0] or 0
+                    sequence = last + 1
+                    tube_number = ((sequence - 1) // 50) + 1
+                    tube_position = ((sequence - 1) % 50) + 1
+                connection.execute(
+                    "UPDATE scans SET tube_number=?, tube_position=?, storage_status='tube', hold_reason='', analysis_json=? WHERE id=?",
+                    (tube_number, tube_position, json.dumps(analysis), scan_id),
+                )
+                storage = {'storage_status': 'tube', 'tube_number': tube_number, 'tube_position': tube_position}
+    return jsonify({'ok': True, 'location': storage, 'analysis': analysis})
 
 
 @app.post('/api/scans/<int:scan_id>/analyze')
@@ -393,6 +467,25 @@ def identify_scan(scan_id: int):
             connection.execute(
                 'UPDATE scans SET denomination=?, year=?, mint_mark=?, coin_series=? WHERE id=?',
                 (result['denomination'], str(result['year']), result['mint_mark'], result['coin_series'], scan_id),
+            )
+    return jsonify(result), 200 if result['ok'] else 503
+
+
+@app.post('/api/scans/<int:scan_id>/grade')
+def grade_scan(scan_id: int):
+    with db() as connection:
+        scan = connection.execute('SELECT obverse, reverse FROM scans WHERE id=?', (scan_id,)).fetchone()
+    if not scan or not scan['obverse'] or not scan['reverse']:
+        return jsonify({'ok': False, 'message': 'Capture both front and back first.'}), 400
+    obverse_path, reverse_path = CAPTURES / scan['obverse'], CAPTURES / scan['reverse']
+    if not obverse_path.is_file() or not reverse_path.is_file():
+        return jsonify({'ok': False, 'message': 'One or both scan images are missing.'}), 404
+    result = estimate_grade(obverse_path, reverse_path)
+    if result['ok']:
+        with db() as connection:
+            connection.execute(
+                'UPDATE scans SET grade=?, grade_confidence=?, grade_reason=? WHERE id=?',
+                (result['grade'], result['confidence'], result['reason'], scan_id),
             )
     return jsonify(result), 200 if result['ok'] else 503
 
