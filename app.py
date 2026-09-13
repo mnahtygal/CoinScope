@@ -25,6 +25,7 @@ CATALOG = ROOT / "catalog" / "us_coins.json"
 NONCENT_CATALOG = ROOT / "catalog" / "us_noncent.json"
 VISION_URL = os.environ.get('COINSCOPE_VISION_URL', 'http://127.0.0.1:8081/v1/chat/completions')
 HOLD_VALUE_THRESHOLD = 5.00
+CENT_HOLD_VALUE_THRESHOLD = 1.00
 TUBE_CAPACITIES = {'1c': 50, '5c': 40, '10c': 50, '25c': 40, '50c': 20, '1 Dollar': 20, 'Silver Dollar': 20}
 TUBE_LABELS = {'1c': '1C', '5c': '5C', '10c': '10C', '25c': '25C', '50c': '50C', '1 Dollar': 'DOLLAR', 'Silver Dollar': 'DOLLAR'}
 FACE_VALUES = {'1c': 0.01, '5c': 0.05, '10c': 0.10, '25c': 0.25, '50c': 0.50, '1 Dollar': 1.00, 'Silver Dollar': 1.00}
@@ -463,11 +464,16 @@ def update_scan(scan_id: int):
             analysis_payload = {**payload, 'coin_series': existing['coin_series'] or '', 'coin_variant': existing['coin_variant'] or ''}
             analysis = analyze_record(analysis_payload)
             critical_checks = [c for c in analysis.get('date_specific_checks', []) if c.get('severity') == 'critical'] if analysis.get('matched') else []
-            high_value = analysis.get('matched') and float(analysis.get('value_high', 0)) >= HOLD_VALUE_THRESHOLD
+            value_high = float(analysis.get('value_high', 0)) if analysis.get('matched') else 0.0
+            hold_threshold = CENT_HOLD_VALUE_THRESHOLD if denomination == '1c' else HOLD_VALUE_THRESHOLD
+            high_value = value_high > hold_threshold if denomination == '1c' else value_high >= hold_threshold
             if high_value or critical_checks:
                 reasons = []
                 if high_value:
-                    reasons.append(f"estimated {analysis['grade']} range reaches ${analysis['value_high']:.2f}")
+                    reasons.append(
+                        f"estimated {analysis['grade']} range reaches ${analysis['value_high']:.2f} "
+                        f"(hold threshold ${hold_threshold:.2f})"
+                    )
                 if critical_checks:
                     reasons.append('critical date-specific collector check')
                 hold_reason = '; '.join(reasons)
