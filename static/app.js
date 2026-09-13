@@ -98,8 +98,16 @@ async function loadCollectionSummary(){
   $('tube-summary').innerHTML=s.tubes.length?s.tubes.map(t=>`<div class="tube-card"><b>${t.label} Tube ${String(t.tube_number).padStart(3,'0')}</b><span>${t.count}/${t.capacity}</span><progress value="${t.count}" max="${t.capacity}"></progress><small>$${t.value_low.toFixed(2)}–$${t.value_high.toFixed(2)}</small></div>`).join(''):'<p>No filled tube positions yet.</p>';
   const coverage=`${s.priced_count} collector-priced${s.face_value_count?` • ${s.face_value_count} at face value`:''}`;
   $('hold-summary').textContent=s.hold_count?`⚠ ${s.hold_count} coin${s.hold_count===1?'':'s'} held out for inspection • ${coverage}`:coverage;
+  $('metric-total').textContent=s.coin_count; $('metric-tubed').textContent=s.tubed_count; $('metric-held').textContent=s.hold_count;
+  $('metric-value').textContent=`$${s.value_low.toFixed(2)}–$${s.value_high.toFixed(2)}`;
+  $('report-time').textContent=`Updated ${new Date(s.generated_at).toLocaleString()}`;
+  $('denomination-report').innerHTML=s.denominations.map(d=>`<tr><td>${d.denomination}</td><td>${d.count}</td><td>${d.tubed}</td><td>${d.held}</td><td>$${d.value_low.toFixed(2)}–$${d.value_high.toFixed(2)}</td></tr>`).join('');
+  const maxGrade=Math.max(1,...Object.values(s.grades));
+  $('grade-report').innerHTML=Object.entries(s.grades).map(([grade,count])=>`<div class="grade-row"><b>${grade}</b><span><i style="width:${count/maxGrade*100}%"></i></span><strong>${count}</strong></div>`).join('')||'<p>No grades recorded yet.</p>';
+  $('hold-report').innerHTML=s.hold_items.length?s.hold_items.map(c=>`<div class="hold-row"><b>#${c.id} • ${c.year}${c.mint_mark?'-'+c.mint_mark:''} ${c.denomination}</b><span>${c.grade||'Ungraded'} • up to $${c.value_high.toFixed(2)}</span><small>${c.reason||'Collector inspection required'}</small></div>`).join(''):'<p>No coins are currently held aside.</p>';
 }
 
 $('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save; $('analyze').onclick=analyze; $('detect-date').onclick=identifyCoin;
 document.querySelectorAll('[data-side]').forEach(b=>b.onclick=()=>captureSide(b.dataset.side));
+$('print-report').onclick=()=>window.print();
 loadDevices(); loadHistory();
