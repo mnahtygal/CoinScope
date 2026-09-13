@@ -2,6 +2,23 @@
 
 An ad-free Linux workstation for capturing and organizing coin images from a USB microscope.
 
+## U.S. cent catalog
+
+The generated cent catalog covers 391 regular and proof date/mint records from
+1850 through the final 2025 circulating issue. It includes broad grade-based
+collector ranges, date-specific major varieties, and universal mint-error
+inspection checks. The U.S. Mint ended circulating cent production in 2025, so
+2026 is explicitly treated as not issued.
+
+Catalog prices are conservative screening estimates, not offers or appraisals.
+They help decide which coins deserve closer inspection or professional grading.
+Regenerate and validate the catalog with:
+
+```bash
+python3 tools/build_cent_catalog.py
+python3 tests/test_cent_catalog.py
+```
+
 ## What works now
 
 - Discovers Linux V4L2 cameras (`/dev/video*`) and displays their hardware names.
@@ -42,7 +59,7 @@ If the browser shows a broken feed, switch to another entry with the same micros
 
 ## Data and privacy
 
-CoinScope v0.1 makes no network calls. Images and records stay under `data/`. Current market pricing is intentionally not guessed; it will be a separate, source-backed phase.
+CoinScope makes no external network calls while scanning. Images and records stay under `data/`; identification uses the local Gemma vision server and collector screening uses the bundled source-dated catalog.
 
 CoinScope deliberately uses Ubuntu/JetPack's system OpenCV package rather than downloading a generic wheel. That is more reliable with USB cameras on both Thor and Jetson.
 
