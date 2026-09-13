@@ -24,6 +24,7 @@ VISION_URL = "http://127.0.0.1:8081/v1/chat/completions"
 HOLD_VALUE_THRESHOLD = 5.00
 TUBE_CAPACITIES = {'1c': 50, '5c': 40, '10c': 50, '25c': 40, '50c': 20, 'Silver Dollar': 20}
 TUBE_LABELS = {'1c': '1C', '5c': '5C', '10c': '10C', '25c': '25C', '50c': '50C', 'Silver Dollar': 'DOLLAR'}
+FACE_VALUES = {'1c': 0.01, '5c': 0.05, '10c': 0.10, '25c': 0.25, '50c': 0.50, 'Silver Dollar': 1.00}
 DATA.mkdir(exist_ok=True)
 CAPTURES.mkdir(exist_ok=True)
 
@@ -512,7 +513,7 @@ def collection_summary():
         rows = connection.execute("SELECT * FROM scans WHERE status='saved' ORDER BY id").fetchall()
     tubes = {}
     total_low = total_high = 0.0
-    priced_count = hold_count = 0
+    priced_count = face_value_count = hold_count = 0
     for row in rows:
         item = dict(row)
         try:
@@ -520,9 +521,15 @@ def collection_summary():
         except json.JSONDecodeError:
             analysis = {}
         if analysis.get('matched'):
-            total_low += float(analysis.get('value_low', 0))
-            total_high += float(analysis.get('value_high', 0))
+            coin_low = float(analysis.get('value_low', 0))
+            coin_high = float(analysis.get('value_high', 0))
             priced_count += 1
+        else:
+            coin_low = coin_high = FACE_VALUES.get(item.get('denomination'), 0.0)
+            if coin_low:
+                face_value_count += 1
+        total_low += coin_low
+        total_high += coin_high
         if item.get('storage_status') == 'hold':
             hold_count += 1
         if item.get('tube_number') and item.get('denomination') in TUBE_CAPACITIES:
@@ -533,11 +540,11 @@ def collection_summary():
                 'count': 0, 'value_low': 0.0, 'value_high': 0.0,
             })
             tube['count'] += 1
-            if analysis.get('matched'):
-                tube['value_low'] += float(analysis.get('value_low', 0))
-                tube['value_high'] += float(analysis.get('value_high', 0))
+            tube['value_low'] += coin_low
+            tube['value_high'] += coin_high
     return jsonify({
-        'coin_count': len(rows), 'priced_count': priced_count, 'hold_count': hold_count,
+        'coin_count': len(rows), 'priced_count': priced_count, 'face_value_count': face_value_count,
+        'hold_count': hold_count,
         'value_low': round(total_low, 2), 'value_high': round(total_high, 2),
         'tubes': list(tubes.values()),
     })
