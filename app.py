@@ -89,8 +89,10 @@ class Camera:
         if not candidate.isOpened():
             candidate.release()
             return False
-        candidate.set(cv2.CAP_PROP_FRAME_WIDTH, 1600)
-        candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, 1200)
+        candidate.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
+        candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
+        candidate.set(cv2.CAP_PROP_FPS, 21)
+        candidate.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         with self.lock:
             old = self.capture
             self.capture = candidate
@@ -109,8 +111,9 @@ class Camera:
         while self.running:
             with self.lock:
                 cap = self.capture
-                ok, frame = cap.read() if cap else (False, None)
-                if ok:
+            ok, frame = cap.read() if cap else (False, None)
+            if ok:
+                with self.lock:
                     self.frame = frame
             if not ok:
                 time.sleep(0.08)
@@ -119,8 +122,9 @@ class Camera:
         with self.lock:
             if self.frame is None:
                 return None
-            ok, encoded = cv2.imencode('.jpg', self.frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
-            return encoded.tobytes() if ok else None
+            frame = self.frame.copy()
+        ok, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return encoded.tobytes() if ok else None
 
 
 camera = Camera()
@@ -237,6 +241,7 @@ def captures(name: str):
 if __name__ == '__main__':
     devices_found = camera_devices()
     if devices_found:
-        camera.open(devices_found[-1]['index'])
+        preferred = next((d for d in devices_found if 'microscope' in d['name'].lower() and d['index'] % 2 == 0), devices_found[0])
+        camera.open(preferred['index'])
     print('\nCoinScope is ready: http://127.0.0.1:5050\n')
     app.run(host='127.0.0.1', port=5050, threaded=True)
