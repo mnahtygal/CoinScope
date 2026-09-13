@@ -48,11 +48,11 @@ async function identifyCoin(){
   if(!scanId) return alert('Capture both sides of a coin first.');
   $('detect-date').disabled=true; $('detect-status').textContent='Gemma is identifying both sides…';
   try{
-    const response=await fetch(`/api/scans/${scanId}/identify`,{method:'POST'}); const result=await response.json();
+    const response=await fetch(`/api/scans/${scanId}/identify`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({denomination_hint:$('denomination').value})}); const result=await response.json();
     if(!response.ok||!result.ok){$('detect-status').textContent=result.message||'Detection failed.';return;}
     $('denomination').value=result.denomination; $('year').value=result.year; $('mint_mark').value=result.mint_mark;
     const dc=Math.round(result.denomination_confidence*100), yc=Math.round(result.year_confidence*100), mc=Math.round(result.mint_confidence*100);
-    $('detect-status').textContent=`${result.coin_series||'Coin'}${result.coin_variant?' • '+result.coin_variant:''} • ${result.denomination} • ${result.year}${result.mint_mark?'-'+result.mint_mark:''} • confidence ${dc}/${yc}/${mc}%`;
+    $('detect-status').textContent=`${result.coin_series||'Coin'}${result.coin_variant?' • '+result.coin_variant:''} • ${result.denomination}${result.denomination_text?' • read “'+result.denomination_text+'”':''} • ${result.year}${result.mint_mark?'-'+result.mint_mark:''} • confidence ${dc}/${yc}/${mc}%`;
   } finally {$('detect-date').disabled=false;}
 }
 
