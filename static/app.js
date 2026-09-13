@@ -43,6 +43,18 @@ async function analyze(){
   $('analysis').innerHTML=`<div class="analysis-icon">✦</div><div><h3>${result.name}</h3><p>${result.mint} • ${result.composition} • ${result.weight_g} g • ${result.diameter_mm} mm</p><div class="value">$${result.value_low.toFixed(2)}–$${result.value_high.toFixed(2)} <small>estimated ${result.grade}</small></div><p class="source">${result.price_source} • updated ${result.price_updated}</p><h4>Collector checks</h4><ul class="checks">${checks}</ul><a href="${result.source_url}" target="_blank" rel="noopener">Open reference source</a></div>`;
 }
 
+async function detectDate(){
+  if(!scanId) return alert('Capture the front of a coin first.');
+  $('detect-date').disabled=true; $('detect-status').textContent='Gemma is reading the coin…';
+  try{
+    const response=await fetch(`/api/scans/${scanId}/detect-date`,{method:'POST'}); const result=await response.json();
+    if(!response.ok||!result.ok){$('detect-status').textContent=result.message||'Detection failed.';return;}
+    $('year').value=result.year; $('mint_mark').value=result.mint_mark;
+    const yc=Math.round(result.year_confidence*100), mc=Math.round(result.mint_confidence*100);
+    $('detect-status').textContent=`Detected ${result.year}${result.mint_mark?'-'+result.mint_mark:''} • year ${yc}% • mint ${mc}%`;
+  } finally {$('detect-date').disabled=false;}
+}
+
 async function captureSide(side) {
   if(!scanId) await newScan();
   const response=await fetch(`/api/scans/${scanId}/capture/${side}`,{method:'POST'}); const data=await response.json();
@@ -63,6 +75,6 @@ async function loadHistory(){
   $('history').innerHTML=scans.length?scans.map(s=>`<div class="history-item">${s.obverse?`<img src="/captures/${s.obverse}">`:'<div class="history-placeholder">◉</div>'}<div><b>${[s.year,s.denomination].filter(Boolean).join(' ')||`Scan #${s.id}`}</b><small>${s.country||'Identification pending'}</small><small>${new Date(s.created_at).toLocaleString()}</small></div></div>`).join(''):'<p>No saved coins yet. Put one under the microscope and start scanning.</p>';
 }
 
-$('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save; $('analyze').onclick=analyze;
+$('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save; $('analyze').onclick=analyze; $('detect-date').onclick=detectDate;
 document.querySelectorAll('[data-side]').forEach(b=>b.onclick=()=>captureSide(b.dataset.side));
 loadDevices(); loadHistory();
