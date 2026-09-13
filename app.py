@@ -168,17 +168,23 @@ def detect_year_and_mint(image_path: Path) -> dict:
     }
 
 
-def identify_coin(obverse_path: Path, reverse_path: Path) -> dict:
+def identify_coin(obverse_path: Path, reverse_path: Path, denomination_hint: str = '') -> dict:
     def data_url(path: Path) -> str:
         encoded = base64.b64encode(path.read_bytes()).decode('ascii')
         return f'data:image/jpeg;base64,{encoded}'
 
+    hint_text = f' The operator selected {denomination_hint}; verify it from the coin rather than blindly accepting it.' if denomination_hint else ''
     prompt = (
         'These are the obverse and reverse of the same United States coin. Read only what is '
         'visible in the images. Identify the denomination, four-digit year, mint mark, and coin '
         'series and visible subtype or reverse design. Denomination must be exactly one of: 1c, 5c, 10c, 25c, 50c, 1 Dollar. '
+        'First transcribe the denomination words visible on the reverse. Enforce these meanings: '
+        'ONE CENT means 1c; FIVE CENTS means 5c; ONE DIME means 10c; QUARTER DOLLAR means 25c; '
+        'HALF DOLLAR means 50c; ONE DOLLAR means 1 Dollar. Never identify a Lincoln cent when '
+        'the reverse says ONE DIME. '
         'Mint mark must be P, D, S, O, CC, W, or blank. Return only compact JSON with keys denomination, '
-        'year, mint_mark, coin_series, coin_variant, denomination_confidence, year_confidence, mint_confidence.'
+        'denomination_text, year, mint_mark, coin_series, coin_variant, denomination_confidence, year_confidence, mint_confidence.'
+        + hint_text
     )
     body = json.dumps({
         'model': 'ggml-org/gemma-3-4b-it-qat-GGUF',
@@ -206,6 +212,17 @@ def identify_coin(obverse_path: Path, reverse_path: Path) -> dict:
         mint = str(detected.get('mint_mark', '')).strip().upper()
         denomination = str(detected['denomination']).strip()
         valid_denominations = {'1c', '5c', '10c', '25c', '50c', '1 Dollar'}
+        denomination_text = re.sub(r'[^A-Z ]', ' ', str(detected.get('denomination_text', '')).upper())
+        denomination_text = re.sub(r'\s+', ' ', denomination_text).strip()
+        text_mappings = {
+            'ONE CENT': '1c', 'FIVE CENTS': '5c', 'ONE DIME': '10c',
+            'QUARTER DOLLAR': '25c', 'HALF DOLLAR': '50c', 'ONE DOLLAR': '1 Dollar',
+        }
+        evidence_denomination = next((value for words, value in text_mappings.items() if words in denomination_text), '')
+        if denomination_hint in valid_denominations:
+            denomination = denomination_hint
+        elif evidence_denomination:
+            denomination = evidence_denomination
         if year < 1792 or year > datetime.now().year + 1:
             raise ValueError('invalid year')
         if mint not in {'', 'P', 'D', 'S', 'O', 'CC', 'W'} or denomination not in valid_denominations:
@@ -213,7 +230,8 @@ def identify_coin(obverse_path: Path, reverse_path: Path) -> dict:
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return {'ok': False, 'message': 'Gemma returned invalid coin identification data.'}
     return {
-        'ok': True, 'denomination': denomination, 'year': year, 'mint_mark': mint,
+        'ok': True, 'denomination': denomination, 'denomination_text': denomination_text,
+        'year': year, 'mint_mark': mint,
         'coin_series': str(detected.get('coin_series', '')).strip(),
         'coin_variant': str(detected.get('coin_variant', '')).strip(),
         'denomination_confidence': float(detected.get('denomination_confidence', 0)),
@@ -493,7 +511,8 @@ def identify_scan(scan_id: int):
     obverse_path, reverse_path = CAPTURES / scan['obverse'], CAPTURES / scan['reverse']
     if not obverse_path.is_file() or not reverse_path.is_file():
         return jsonify({'ok': False, 'message': 'One or both scan images are missing.'}), 404
-    result = identify_coin(obverse_path, reverse_path)
+    denomination_hint = str((request.json or {}).get('denomination_hint', '')).strip()
+    result = identify_coin(obverse_path, reverse_path, denomination_hint)
     if result['ok']:
         with db() as connection:
             connection.execute(
