@@ -34,6 +34,13 @@ CAPTURES.mkdir(exist_ok=True)
 app = Flask(__name__)
 
 
+def normalize_mint_mark(value) -> str:
+    mint = str(value or '').strip().upper()
+    if mint in {'BLANK', 'NONE', 'NO MINT MARK', 'NO MINTMARK', 'PHILADELPHIA'}:
+        return ''
+    return mint
+
+
 def db() -> sqlite3.Connection:
     connection = sqlite3.connect(DB)
     connection.row_factory = sqlite3.Row
@@ -84,7 +91,7 @@ def analyze_record(payload: dict) -> dict:
     if year < 1792 or year > datetime.now().year + 1:
         return {'matched': False, 'message': 'Enter a valid four-digit U.S. coin year.'}
     denomination = str(payload.get('denomination', '')).strip()
-    mint_mark = str(payload.get('mint_mark', '')).strip().upper()
+    mint_mark = normalize_mint_mark(payload.get('mint_mark', ''))
     # Philadelphia cents normally carry no mint mark. The 2017-P cent is the
     # sole circulating exception, so normalize vision's inferred P elsewhere.
     if denomination == '1c' and mint_mark == 'P' and year != 2017:
@@ -162,7 +169,7 @@ def detect_year_and_mint(image_path: Path) -> dict:
     try:
         detected = json.loads(match.group(0))
         year = int(detected['year'])
-        mint = str(detected.get('mint_mark', '')).strip().upper()
+        mint = normalize_mint_mark(detected.get('mint_mark', ''))
         if year < 1792 or year > datetime.now().year + 1 or mint not in {'', 'P', 'D', 'S', 'O', 'CC', 'W'}:
             raise ValueError('invalid year or mint mark')
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -215,7 +222,7 @@ def identify_coin(obverse_path: Path, reverse_path: Path, denomination_hint: str
     try:
         detected = json.loads(match.group(0))
         year = int(detected['year'])
-        mint = str(detected.get('mint_mark', '')).strip().upper()
+        mint = normalize_mint_mark(detected.get('mint_mark', ''))
         denomination = str(detected['denomination']).strip()
         valid_denominations = {'1c', '5c', '10c', '25c', '50c', '1 Dollar'}
         denomination_text = re.sub(r'[^A-Z ]', ' ', str(detected.get('denomination_text', '')).upper())
@@ -438,6 +445,7 @@ def capture(scan_id: int, side: str):
 @app.put('/api/scans/<int:scan_id>')
 def update_scan(scan_id: int):
     payload = request.json or {}
+    payload['mint_mark'] = normalize_mint_mark(payload.get('mint_mark', ''))
     fields = ['country', 'denomination', 'year', 'mint_mark', 'notes', 'status', 'grade']
     values = [str(payload.get(field, '')) for field in fields]
     with db() as connection:
