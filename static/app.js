@@ -32,6 +32,7 @@ async function newScan() {
   for(const side of ['obverse','reverse']) { $(side).innerHTML='<b>Not captured</b>'; $(`${side}-quality`).textContent=''; }
   fields.forEach(f=>$(f).value='');
   $('country').value='USA'; $('grade').value='VF';
+  $('grade-status').textContent=''; $('detect-status').textContent='';
 }
 
 async function analyze(){
@@ -55,13 +56,22 @@ async function identifyCoin(){
   } finally {$('detect-date').disabled=false;}
 }
 
+async function gradeCoin(){
+  if(!scanId) return;
+  $('grade-status').textContent='Gemma is estimating a conservative grade…';
+  const response=await fetch(`/api/scans/${scanId}/grade`,{method:'POST'}); const result=await response.json();
+  if(!response.ok||!result.ok){$('grade-status').textContent=result.message||'Automatic grading failed.';return;}
+  $('grade').value=result.grade;
+  $('grade-status').textContent=`AI screening grade ${result.grade} • ${Math.round(result.confidence*100)}% confidence${result.reason?' • '+result.reason:''}`;
+}
+
 async function captureSide(side) {
   if(!scanId) await newScan();
   const response=await fetch(`/api/scans/${scanId}/capture/${side}`,{method:'POST'}); const data=await response.json();
   if(!response.ok) return alert(data.error);
   $(side).innerHTML=`<img src="${data.url}?t=${Date.now()}" alt="${side}">`;
   $(`${side}-quality`).textContent=`Focus score: ${data.sharpness} ${data.sharpness>120?'• Sharp':'• Try adjusting focus'}`;
-  if(side==='reverse' && $('obverse').querySelector('img')) await identifyCoin();
+  if(side==='reverse' && $('obverse').querySelector('img')) { await identifyCoin(); await gradeCoin(); }
 }
 
 async function save() {
@@ -69,14 +79,15 @@ async function save() {
   const payload=Object.fromEntries(fields.map(f=>[f,$(f).value])); payload.status='saved';
   const result=await fetch(`/api/scans/${scanId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
   $('scan-title').textContent=[payload.year,payload.denomination].filter(Boolean).join(' ')||'Saved coin';
-  if(result.location?.tube_number) $('detect-status').textContent=`Stored in 1C Tube ${String(result.location.tube_number).padStart(3,'0')} • position ${String(result.location.tube_position).padStart(2,'0')}/50`;
+  if(result.location?.storage_status==='hold') $('detect-status').textContent=`⚠ HOLD — DO NOT TUBE • ${result.location.hold_reason}`;
+  else if(result.location?.tube_number) $('detect-status').textContent=`Stored in 1C Tube ${String(result.location.tube_number).padStart(3,'0')} • position ${String(result.location.tube_position).padStart(2,'0')}/50`;
   await loadHistory();
   await analyze();
 }
 
 async function loadHistory(){
   const {scans}=await fetch('/api/scans').then(r=>r.json()); $('count').textContent=`${scans.length} coin${scans.length===1?'':'s'}`;
-  $('history').innerHTML=scans.length?scans.map(s=>`<div class="history-item">${s.obverse?`<img src="/captures/${s.obverse}">`:'<div class="history-placeholder">◉</div>'}<div><b>${[s.year,s.denomination].filter(Boolean).join(' ')||`Scan #${s.id}`}</b><small>${s.country||'Identification pending'}</small>${s.tube_number?`<small>1C Tube ${String(s.tube_number).padStart(3,'0')} • ${String(s.tube_position).padStart(2,'0')}/50</small>`:''}<small>${new Date(s.created_at).toLocaleString()}</small></div></div>`).join(''):'<p>No saved coins yet. Put one under the microscope and start scanning.</p>';
+  $('history').innerHTML=scans.length?scans.map(s=>`<div class="history-item${s.storage_status==='hold'?' hold-item':''}">${s.obverse?`<img src="/captures/${s.obverse}">`:'<div class="history-placeholder">◉</div>'}<div><b>${[s.year,s.denomination].filter(Boolean).join(' ')||`Scan #${s.id}`}</b><small>${s.country||'Identification pending'}</small>${s.storage_status==='hold'?`<small class="hold-label">⚠ HOLD — DO NOT TUBE</small>`:s.tube_number?`<small>1C Tube ${String(s.tube_number).padStart(3,'0')} • ${String(s.tube_position).padStart(2,'0')}/50</small>`:''}<small>${new Date(s.created_at).toLocaleString()}</small></div></div>`).join(''):'<p>No saved coins yet. Put one under the microscope and start scanning.</p>';
 }
 
 $('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save; $('analyze').onclick=analyze; $('detect-date').onclick=identifyCoin;
