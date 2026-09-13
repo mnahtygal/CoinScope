@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CoinScope</title>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/collector.css">
 </head>
 <body>
   <header><div class="brand"><span>◉</span><div><h1>CoinScope</h1><p>Coin identification & inspection</p></div></div><div class="status"><i></i><span id="camera-status">Looking for microscope…</span></div></header>
@@ -17,23 +18,9 @@
     <section class="details card">
       <div class="title-row"><div><small>CURRENT SCAN</small><h2 id="scan-title">Ready for a new coin</h2></div><span class="pill" id="scan-id">—</span></div>
       <div class="sides"><div><span>FRONT / OBVERSE</span><div class="thumb" id="obverse"><b>Not captured</b></div><small id="obverse-quality"></small></div><div><span>BACK / REVERSE</span><div class="thumb" id="reverse"><b>Not captured</b></div><small id="reverse-quality"></small></div></div>
-      <div class="form-grid"><label>Country
-        <select id="country">
-          <option value="USA" selected>USA</option>
-        </select>
-      </label><label>Denomination
-        <select id="denomination">
-          <option value="">Select denomination</option>
-          <option value="1c">1c</option>
-          <option value="5c">5c</option>
-          <option value="10c">10c</option>
-          <option value="25c">25c</option>
-          <option value="50c">50c</option>
-          <option value="Silver Dollar">Silver Dollar</option>
-        </select>
-      </label><label>Year<input id="year" inputmode="numeric" placeholder="e.g. 1944"></label><label>Mint mark<input id="mint_mark" placeholder="P, D, S…"></label></div>
+      <div class="form-grid"><label>Country<select id="country"><option value="USA">USA</option></select></label><label>Denomination<select id="denomination"><option value="">Select</option><option>1c</option><option>5c</option><option>10c</option><option>25c</option><option>50c</option><option>Silver Dollar</option></select></label><label>Year<input id="year" inputmode="numeric" placeholder="e.g. 1943"></label><label>Mint mark<input id="mint_mark" placeholder="Blank, D, S…"></label><label>Estimated grade<select id="grade"><option>G</option><option>F</option><option selected>VF</option><option>XF</option><option>AU</option><option>MS</option></select></label></div>
       <label>Notes<textarea id="notes" placeholder="Condition, unusual marks, where you found it…"></textarea></label>
-      <div class="analysis"><div class="analysis-icon">✦</div><div><h3>AI analysis comes next</h3><p>v0.1 captures a clean, organized image set first. Identification, variety checks, grading assistance, and live sold-price research will plug into this panel.</p></div></div>
+      <button class="analyze-button" id="analyze">Analyze collector value</button><div class="analysis" id="analysis"><div class="analysis-icon">✦</div><div><h3>Collector analysis</h3><p>Capture both sides, enter the year and mint mark, then analyze against the curated local database.</p></div></div>
       <button class="save" id="save">Save to collection</button>
     </section>
     <section class="collection card"><div class="title-row"><div><small>MY COLLECTION</small><h2>Recent scans</h2></div><span id="count" class="pill">0 coins</span></div><div id="history" class="history"></div></section>
@@ -41,4 +28,3 @@
   <script src="/static/app.js"></script>
 </body>
 </html>
-
