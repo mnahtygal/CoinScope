@@ -71,6 +71,7 @@ async function save() {
   $('scan-title').textContent=[payload.year,payload.denomination].filter(Boolean).join(' ')||'Saved coin';
   if(result.location?.tube_number) $('detect-status').textContent=`Stored in 1C Tube ${String(result.location.tube_number).padStart(3,'0')} • position ${String(result.location.tube_position).padStart(2,'0')}/50`;
   await loadHistory();
+  await analyze();
 }
 
 async function loadHistory(){
