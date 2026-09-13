@@ -583,9 +583,10 @@ def list_scans():
 def collection_summary():
     with db() as connection:
         rows = connection.execute("SELECT * FROM scans WHERE status='saved' ORDER BY id").fetchall()
-    tubes = {}
+    tubes, denominations, grades = {}, {}, {}
+    hold_items = []
     total_low = total_high = 0.0
-    priced_count = face_value_count = hold_count = 0
+    priced_count = face_value_count = hold_count = tubed_count = 0
     refreshed_analyses = []
     storage_updates = []
     for row in rows:
@@ -614,6 +615,7 @@ def collection_summary():
                 f"${coin_high:.2f} (hold threshold ${CENT_HOLD_VALUE_THRESHOLD:.2f})"
             )
             item['storage_status'] = 'hold'
+            item['hold_reason'] = hold_reason
             item['tube_number'] = None
             item['tube_position'] = None
             storage_updates.append((hold_reason, item['id']))
@@ -621,6 +623,27 @@ def collection_summary():
         total_high += coin_high
         if item.get('storage_status') == 'hold':
             hold_count += 1
+            hold_items.append({
+                'id': item['id'], 'year': item.get('year', ''),
+                'denomination': item.get('denomination', ''),
+                'mint_mark': normalize_mint_mark(item.get('mint_mark', '')),
+                'grade': item.get('grade', ''), 'value_high': round(coin_high, 2),
+                'reason': item.get('hold_reason', ''),
+            })
+        elif item.get('storage_status') == 'tube':
+            tubed_count += 1
+        denomination = item.get('denomination') or 'Unidentified'
+        summary = denominations.setdefault(denomination, {
+            'denomination': denomination, 'count': 0, 'tubed': 0, 'held': 0,
+            'value_low': 0.0, 'value_high': 0.0,
+        })
+        summary['count'] += 1
+        summary['tubed'] += int(item.get('storage_status') == 'tube')
+        summary['held'] += int(item.get('storage_status') == 'hold')
+        summary['value_low'] += coin_low
+        summary['value_high'] += coin_high
+        grade_name = item.get('grade') or 'Unknown'
+        grades[grade_name] = grades.get(grade_name, 0) + 1
         if item.get('tube_number') and item.get('denomination') in TUBE_CAPACITIES:
             key = (item['denomination'], item['tube_number'])
             tube = tubes.setdefault(key, {
@@ -642,9 +665,17 @@ def collection_summary():
             )
     return jsonify({
         'coin_count': len(rows), 'priced_count': priced_count, 'face_value_count': face_value_count,
-        'hold_count': hold_count,
+        'hold_count': hold_count, 'tubed_count': tubed_count,
         'value_low': round(total_low, 2), 'value_high': round(total_high, 2),
         'tubes': list(tubes.values()),
+        'denominations': [
+            {**value, 'value_low': round(value['value_low'], 2),
+             'value_high': round(value['value_high'], 2)}
+            for value in denominations.values()
+        ],
+        'grades': grades,
+        'hold_items': sorted(hold_items, key=lambda value: value['value_high'], reverse=True),
+        'generated_at': datetime.now(timezone.utc).isoformat(),
     })
 
 
