@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 CAPTURES = DATA / "captures"
 DB = DATA / "coinscope.db"
+CATALOG = ROOT / "catalog" / "us_coins.json"
 DATA.mkdir(exist_ok=True)
 CAPTURES.mkdir(exist_ok=True)
 
@@ -43,6 +44,27 @@ def init_db() -> None:
                 status TEXT DEFAULT 'capturing'
             )
         """)
+        columns = {row[1] for row in connection.execute('PRAGMA table_info(scans)')}
+        for name, definition in {'grade': "TEXT DEFAULT 'VF'", 'analysis_json': "TEXT DEFAULT ''"}.items():
+            if name not in columns:
+                connection.execute(f'ALTER TABLE scans ADD COLUMN {name} {definition}')
+
+
+def analyze_record(payload: dict) -> dict:
+    catalog = json.loads(CATALOG.read_text(encoding='utf-8'))
+    try:
+        year = int(str(payload.get('year', '')).strip())
+    except ValueError:
+        return {'matched': False, 'message': 'Enter a four-digit year before analysis.'}
+    denomination = str(payload.get('denomination', '')).strip()
+    mint_mark = str(payload.get('mint_mark', '')).strip().upper()
+    matches = [r for r in catalog['records'] if r['country'] == 'USA' and r['denomination'] == denomination and r['year'] == year and r['mint_mark'] == mint_mark]
+    if not matches:
+        return {'matched': False, 'message': f'{year} {denomination} {mint_mark}'.strip() + ' is not curated yet. The scan remains safely saved.'}
+    record = matches[0]
+    grade = str(payload.get('grade', 'VF')).upper()
+    low, high = record['prices'].get(grade, record['prices']['VF'])
+    return {'matched': True, 'grade': grade, 'value_low': low, 'value_high': high, **record}
 
 
 class Camera:
@@ -56,6 +78,9 @@ class Camera:
         self.thread.start()
 
     def open(self, index: int) -> bool:
+        # The page asks to select the default camera after startup. If that
+        # camera is already streaming, do not attempt to open the busy V4L2
+        # device a second time.
         with self.lock:
             if self.index == index and self.capture is not None and self.capture.isOpened():
                 return True
@@ -64,10 +89,8 @@ class Camera:
         if not candidate.isOpened():
             candidate.release()
             return False
-        candidate.set(cv2.CAP_PROP_FRAME_WIDTH, 800)
-        candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, 600)
-        candidate.set(cv2.CAP_PROP_FPS, 21)
-        candidate.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        candidate.set(cv2.CAP_PROP_FRAME_WIDTH, 1600)
+        candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, 1200)
         with self.lock:
             old = self.capture
             self.capture = candidate
@@ -86,25 +109,18 @@ class Camera:
         while self.running:
             with self.lock:
                 cap = self.capture
-
-            ok, frame = cap.read() if cap else (False, None)
-
-            if ok:
-                with self.lock:
+                ok, frame = cap.read() if cap else (False, None)
+                if ok:
                     self.frame = frame
-            else:
+            if not ok:
                 time.sleep(0.08)
 
     def jpg(self) -> bytes | None:
         with self.lock:
             if self.frame is None:
                 return None
-            frame = self.frame.copy()
-
-        ok, encoded = cv2.imencode(
-            '.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85]
-        )
-        return encoded.tobytes() if ok else None
+            ok, encoded = cv2.imencode('.jpg', self.frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            return encoded.tobytes() if ok else None
 
 
 camera = Camera()
@@ -187,14 +203,23 @@ def capture(scan_id: int, side: str):
 @app.put('/api/scans/<int:scan_id>')
 def update_scan(scan_id: int):
     payload = request.json or {}
-    fields = ['country', 'denomination', 'year', 'mint_mark', 'notes', 'status']
+    fields = ['country', 'denomination', 'year', 'mint_mark', 'notes', 'status', 'grade']
     values = [str(payload.get(field, '')) for field in fields]
     with db() as connection:
         connection.execute(
-            'UPDATE scans SET country=?, denomination=?, year=?, mint_mark=?, notes=?, status=? WHERE id=?',
+            'UPDATE scans SET country=?, denomination=?, year=?, mint_mark=?, notes=?, status=?, grade=? WHERE id=?',
             (*values, scan_id),
         )
     return jsonify({'ok': True})
+
+
+@app.post('/api/scans/<int:scan_id>/analyze')
+def analyze_scan(scan_id: int):
+    payload = request.json or {}
+    result = analyze_record(payload)
+    with db() as connection:
+        connection.execute('UPDATE scans SET analysis_json=?, grade=? WHERE id=?', (json.dumps(result), str(payload.get('grade', 'VF')), scan_id))
+    return jsonify(result)
 
 
 @app.get('/api/scans')
@@ -215,4 +240,3 @@ if __name__ == '__main__':
         camera.open(devices_found[-1]['index'])
     print('\nCoinScope is ready: http://127.0.0.1:5050\n')
     app.run(host='127.0.0.1', port=5050, threaded=True)
-
