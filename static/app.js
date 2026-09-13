@@ -80,14 +80,23 @@ async function save() {
   const result=await fetch(`/api/scans/${scanId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(r=>r.json());
   $('scan-title').textContent=[payload.year,payload.denomination].filter(Boolean).join(' ')||'Saved coin';
   if(result.location?.storage_status==='hold') $('detect-status').textContent=`⚠ HOLD — DO NOT TUBE • ${result.location.hold_reason}`;
-  else if(result.location?.tube_number) $('detect-status').textContent=`Stored in 1C Tube ${String(result.location.tube_number).padStart(3,'0')} • position ${String(result.location.tube_position).padStart(2,'0')}/50`;
+  else if(result.location?.tube_number) $('detect-status').textContent=`Stored in ${result.location.tube_label} Tube ${String(result.location.tube_number).padStart(3,'0')} • position ${String(result.location.tube_position).padStart(2,'0')}/${result.location.capacity}`;
   await loadHistory();
   await analyze();
 }
 
 async function loadHistory(){
   const {scans}=await fetch('/api/scans').then(r=>r.json()); $('count').textContent=`${scans.length} coin${scans.length===1?'':'s'}`;
-  $('history').innerHTML=scans.length?scans.map(s=>`<div class="history-item${s.storage_status==='hold'?' hold-item':''}">${s.obverse?`<img src="/captures/${s.obverse}">`:'<div class="history-placeholder">◉</div>'}<div><b>${[s.year,s.denomination].filter(Boolean).join(' ')||`Scan #${s.id}`}</b><small>${s.country||'Identification pending'}</small>${s.storage_status==='hold'?`<small class="hold-label">⚠ HOLD — DO NOT TUBE</small>`:s.tube_number?`<small>1C Tube ${String(s.tube_number).padStart(3,'0')} • ${String(s.tube_position).padStart(2,'0')}/50</small>`:''}<small>${new Date(s.created_at).toLocaleString()}</small></div></div>`).join(''):'<p>No saved coins yet. Put one under the microscope and start scanning.</p>';
+  const capacities={'1c':50,'5c':40,'10c':50,'25c':40,'50c':20,'Silver Dollar':20}; const labels={'1c':'1C','5c':'5C','10c':'10C','25c':'25C','50c':'50C','Silver Dollar':'DOLLAR'};
+  $('history').innerHTML=scans.length?scans.map(s=>`<div class="history-item${s.storage_status==='hold'?' hold-item':''}">${s.obverse?`<img src="/captures/${s.obverse}">`:'<div class="history-placeholder">◉</div>'}<div><b>${[s.year,s.denomination].filter(Boolean).join(' ')||`Scan #${s.id}`}</b><small>${s.country||'Identification pending'}</small>${s.storage_status==='hold'?`<small class="hold-label">⚠ HOLD — DO NOT TUBE</small>`:s.tube_number?`<small>${labels[s.denomination]||s.denomination.toUpperCase()} Tube ${String(s.tube_number).padStart(3,'0')} • ${String(s.tube_position).padStart(2,'0')}/${capacities[s.denomination]||'?'}</small>`:''}<small>${new Date(s.created_at).toLocaleString()}</small></div></div>`).join(''):'<p>No saved coins yet. Put one under the microscope and start scanning.</p>';
+  await loadCollectionSummary();
+}
+
+async function loadCollectionSummary(){
+  const s=await fetch('/api/collection-summary').then(r=>r.json());
+  $('collection-value').textContent=`$${s.value_low.toFixed(2)}–$${s.value_high.toFixed(2)}`;
+  $('tube-summary').innerHTML=s.tubes.length?s.tubes.map(t=>`<div class="tube-card"><b>${t.label} Tube ${String(t.tube_number).padStart(3,'0')}</b><span>${t.count}/${t.capacity}</span><progress value="${t.count}" max="${t.capacity}"></progress><small>$${t.value_low.toFixed(2)}–$${t.value_high.toFixed(2)}</small></div>`).join(''):'<p>No filled tube positions yet.</p>';
+  $('hold-summary').textContent=s.hold_count?`⚠ ${s.hold_count} coin${s.hold_count===1?'':'s'} held out for inspection • ${s.priced_count}/${s.coin_count} saved coins priced`: `${s.priced_count}/${s.coin_count} saved coins priced`;
 }
 
 $('refresh').onclick=loadDevices; $('camera').onchange=e=>chooseCamera(e.target.value); $('new-scan').onclick=newScan; $('save').onclick=save; $('analyze').onclick=analyze; $('detect-date').onclick=identifyCoin;
