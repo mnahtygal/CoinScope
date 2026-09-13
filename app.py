@@ -587,6 +587,7 @@ def collection_summary():
     total_low = total_high = 0.0
     priced_count = face_value_count = hold_count = 0
     refreshed_analyses = []
+    storage_updates = []
     for row in rows:
         item = dict(row)
         try:
@@ -606,6 +607,16 @@ def collection_summary():
             coin_low = coin_high = FACE_VALUES.get(item.get('denomination'), 0.0)
             if coin_low:
                 face_value_count += 1
+        if (item.get('denomination') == '1c' and item.get('storage_status') == 'tube'
+                and analysis.get('matched') and coin_high > CENT_HOLD_VALUE_THRESHOLD):
+            hold_reason = (
+                f"estimated {analysis.get('grade', item.get('grade', 'VF'))} range reaches "
+                f"${coin_high:.2f} (hold threshold ${CENT_HOLD_VALUE_THRESHOLD:.2f})"
+            )
+            item['storage_status'] = 'hold'
+            item['tube_number'] = None
+            item['tube_position'] = None
+            storage_updates.append((hold_reason, item['id']))
         total_low += coin_low
         total_high += coin_high
         if item.get('storage_status') == 'hold':
@@ -623,6 +634,12 @@ def collection_summary():
     if refreshed_analyses:
         with db() as connection:
             connection.executemany('UPDATE scans SET analysis_json=? WHERE id=?', refreshed_analyses)
+    if storage_updates:
+        with db() as connection:
+            connection.executemany(
+                "UPDATE scans SET storage_status='hold', hold_reason=?, tube_number=NULL, tube_position=NULL WHERE id=?",
+                storage_updates,
+            )
     return jsonify({
         'coin_count': len(rows), 'priced_count': priced_count, 'face_value_count': face_value_count,
         'hold_count': hold_count,
