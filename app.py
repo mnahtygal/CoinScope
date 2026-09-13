@@ -73,13 +73,27 @@ def analyze_record(payload: dict) -> dict:
         return {'matched': False, 'message': 'Enter a valid four-digit U.S. coin year.'}
     denomination = str(payload.get('denomination', '')).strip()
     mint_mark = str(payload.get('mint_mark', '')).strip().upper()
+    if denomination == '1c' and year == 2026:
+        return {
+            'matched': False,
+            'message': catalog.get('scope', {}).get(
+                '2026_status', 'No circulating United States cent was issued for 2026.'
+            ),
+        }
     matches = [r for r in catalog['records'] if r['country'] == 'USA' and r['denomination'] == denomination and r['year'] == year and r['mint_mark'] == mint_mark]
     if not matches:
         return {'matched': False, 'message': f'{year} {denomination} {mint_mark}'.strip() + ' is not curated yet. The scan remains safely saved.'}
-    record = matches[0]
+    detected_series = str(payload.get('coin_series', '')).lower()
+    if len(matches) > 1 and detected_series:
+        ignored = {'cent', 'coin', 'united', 'states', 'the', 'reverse'}
+        wanted = set(re.findall(r'[a-z]+', detected_series)) - ignored
+        record = max(matches, key=lambda item: len(wanted & (set(re.findall(r'[a-z]+', item['series'].lower())) - ignored)))
+    else:
+        record = matches[0]
     grade = str(payload.get('grade', 'VF')).upper()
     low, high = record['prices'].get(grade, record['prices']['VF'])
-    return {'matched': True, 'grade': grade, 'value_low': low, 'value_high': high, **record}
+    checks = [*record.get('checks', []), *catalog.get('universal_error_checks', [])]
+    return {'matched': True, 'grade': grade, 'value_low': low, 'value_high': high, **record, 'checks': checks}
 
 
 def detect_year_and_mint(image_path: Path) -> dict:
@@ -338,6 +352,10 @@ def update_scan(scan_id: int):
 @app.post('/api/scans/<int:scan_id>/analyze')
 def analyze_scan(scan_id: int):
     payload = request.json or {}
+    with db() as connection:
+        scan = connection.execute('SELECT coin_series FROM scans WHERE id=?', (scan_id,)).fetchone()
+    if scan and scan['coin_series']:
+        payload['coin_series'] = scan['coin_series']
     result = analyze_record(payload)
     with db() as connection:
         connection.execute('UPDATE scans SET analysis_json=?, grade=? WHERE id=?', (json.dumps(result), str(payload.get('grade', 'VF')), scan_id))
