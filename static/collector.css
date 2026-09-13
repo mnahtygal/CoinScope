@@ -1,0 +1,4 @@
+.details select{width:100%;min-width:0}.analyze-button{width:100%;margin-top:14px;background:#203b30;border-color:#3b7059;color:var(--green)}
+.analysis{max-height:330px;overflow:auto}.analysis>div:last-child{min-width:0}.analysis h4{margin:12px 0 6px}.analysis a{color:var(--gold)}
+.value{font:700 25px Georgia,serif;color:var(--gold);margin-top:10px}.value small{font:12px Inter,sans-serif;color:var(--muted);text-transform:uppercase}.source{font-size:11px!important}
+.checks{padding-left:18px;margin:7px 0}.checks li{margin:8px 0;line-height:1.35}.checks li small{display:block;color:var(--gold)}.checks .critical{color:#ffcf70}.checks .warning{color:#f2df9b}
