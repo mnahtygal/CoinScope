@@ -2,6 +2,36 @@
 
 An ad-free Linux workstation for capturing and organizing coin images from a USB microscope.
 
+## U.S. cent catalog
+
+The generated cent catalog covers 391 regular and proof date/mint records from
+1850 through the final 2025 circulating issue. It includes broad grade-based
+collector ranges, date-specific major varieties, and universal mint-error
+inspection checks. The U.S. Mint ended circulating cent production in 2025, so
+2026 is explicitly treated as not issued.
+
+Catalog prices are conservative screening estimates, not offers or appraisals.
+They help decide which coins deserve closer inspection or professional grading.
+Regenerate and validate the catalog with:
+
+```bash
+python3 tools/build_cent_catalog.py
+python3 tests/test_cent_catalog.py
+```
+
+## Nickels through dollar coins
+
+`catalog/us_noncent.json` adds source-dated screening coverage from 1850 through
+2026 for nickels, dimes, quarters, half dollars, and dollar coins. It uses 40
+series rules plus key-date/error overrides so overlapping designs such as Morgan
+and Peace dollars are selected using Gemma's detected series and reverse design.
+Historical `O`, `CC`, and `W` mint marks are supported. Rebuild and validate it:
+
+```bash
+python3 tools/build_noncent_catalog.py
+python3 tests/test_noncent_catalog.py
+```
+
 ## What works now
 
 - Discovers Linux V4L2 cameras (`/dev/video*`) and displays their hardware names.
@@ -9,6 +39,8 @@ An ad-free Linux workstation for capturing and organizing coin images from a USB
 - Captures separate obverse/front and reverse/back images at the camera's best available resolution.
 - Reports a focus/sharpness score after each capture.
 - Stores country, denomination, year, mint mark, and notes.
+- Uses local Gemma vision to estimate a conservative screening grade after both sides are captured.
+- Sends cents with an estimated upper range over $1, other coins with a $5+ upper range, or any coin with a critical date-specific alert to HOLD instead of assigning a tube position.
 - Saves images and collection records locally in `data/` using SQLite.
 - Responsive dark interface designed for a desktop monitor or touchscreen.
 
@@ -42,7 +74,7 @@ If the browser shows a broken feed, switch to another entry with the same micros
 
 ## Data and privacy
 
-CoinScope v0.1 makes no network calls. Images and records stay under `data/`. Current market pricing is intentionally not guessed; it will be a separate, source-backed phase.
+CoinScope makes no external network calls while scanning. Images and records stay under `data/`; identification uses the local Gemma vision server and collector screening uses the bundled source-dated catalog.
 
 CoinScope deliberately uses Ubuntu/JetPack's system OpenCV package rather than downloading a generic wheel. That is more reliable with USB cameras on both Thor and Jetson.
 
@@ -53,3 +85,6 @@ CoinScope deliberately uses Ubuntu/JetPack's system OpenCV package rather than d
 3. Known-variety inspection prompts and marked image regions.
 4. Evidence-backed sold-price lookup with date, grade, and source.
 5. Collection export, backup, and value dashboard.
+# macOS scanner station
+
+On an Apple Silicon Mac with Homebrew installed, use `./run-coinscope-mac.sh`. The launcher installs a Python 3.12 environment and FFmpeg, opens a secure SSH tunnel to Gemma Vision on Thor, and starts CoinScope. macOS will ask for Camera permission the first time; allow Terminal to use the microscope.

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CoinScope</title>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/collector.css">
 </head>
 <body>
   <header><div class="brand"><span>◉</span><div><h1>CoinScope</h1><p>Coin identification & inspection</p></div></div><div class="status"><i></i><span id="camera-status">Looking for microscope…</span></div></header>
@@ -13,32 +14,19 @@
       <div class="toolbar"><label>Camera <select id="camera"></select></label><button id="refresh">Refresh</button></div>
       <div class="feed"><img id="feed" src="/video" alt="Live microscope feed"><div id="no-camera">Connect a USB microscope, then press Refresh</div><div class="reticle"></div></div>
       <div class="capture-actions"><button class="primary" data-side="obverse">Capture front</button><button class="primary" data-side="reverse">Capture back</button><button id="new-scan">New coin</button></div>
+      <div class="inventory-panel"><div class="inventory-heading"><div><small>COLLECTION INVENTORY</small><h3>Coin tubes</h3></div><div class="collection-value"><small>ROLLING VALUE</small><b id="collection-value">$0.00–$0.00</b></div></div><div id="tube-summary" class="tube-summary"><p>No filled tube positions yet.</p></div><div id="hold-summary" class="hold-summary"></div></div>
     </section>
     <section class="details card">
       <div class="title-row"><div><small>CURRENT SCAN</small><h2 id="scan-title">Ready for a new coin</h2></div><span class="pill" id="scan-id">—</span></div>
       <div class="sides"><div><span>FRONT / OBVERSE</span><div class="thumb" id="obverse"><b>Not captured</b></div><small id="obverse-quality"></small></div><div><span>BACK / REVERSE</span><div class="thumb" id="reverse"><b>Not captured</b></div><small id="reverse-quality"></small></div></div>
-      <div class="form-grid"><label>Country
-        <select id="country">
-          <option value="USA" selected>USA</option>
-        </select>
-      </label><label>Denomination
-        <select id="denomination">
-          <option value="">Select denomination</option>
-          <option value="1c">1c</option>
-          <option value="5c">5c</option>
-          <option value="10c">10c</option>
-          <option value="25c">25c</option>
-          <option value="50c">50c</option>
-          <option value="Silver Dollar">Silver Dollar</option>
-        </select>
-      </label><label>Year<input id="year" inputmode="numeric" placeholder="e.g. 1944"></label><label>Mint mark<input id="mint_mark" placeholder="P, D, S…"></label></div>
-      <label>Notes<textarea id="notes" placeholder="Condition, unusual marks, where you found it…"></textarea></label>
-      <div class="analysis"><div class="analysis-icon">✦</div><div><h3>AI analysis comes next</h3><p>v0.1 captures a clean, organized image set first. Identification, variety checks, grading assistance, and live sold-price research will plug into this panel.</p></div></div>
-      <button class="save" id="save">Save to collection</button>
+      <div class="form-grid"><label>Country<select id="country"><option value="USA">USA</option></select></label><label>Denomination<select id="denomination"><option value="">Select</option><option>1c</option><option>5c</option><option>10c</option><option>25c</option><option>50c</option><option>1 Dollar</option></select></label><label>Year<input id="year" inputmode="numeric" placeholder="e.g. 1943"></label><label>Mint mark<input id="mint_mark" placeholder="Blank, P, D, S, O, CC, W…"></label><label>Estimated grade<select id="grade"><option>G</option><option>F</option><option selected>VF</option><option>XF</option><option>AU</option><option>MS</option></select></label></div><div id="grade-status" class="detect-status"></div>
+      <button class="detect-button" id="detect-date">Identify coin automatically</button><div id="detect-status" class="detect-status"></div><label>Notes<textarea id="notes" placeholder="Condition, unusual marks, where you found it…"></textarea></label>
+      <button class="analyze-button" id="analyze">Analyze collector value</button><div class="analysis" id="analysis"><div class="analysis-icon">✦</div><div><h3>Collector analysis</h3><p>Capture both sides, enter the year and mint mark, then analyze against the curated local database.</p></div></div>
+      <button class="save" id="save">Save &amp; price coin</button>
     </section>
+    <section class="dashboard card" id="dashboard"><div class="title-row"><div><small>COLLECTION REPORT</small><h2>Dashboard</h2><p id="report-time" class="report-time"></p></div><button id="print-report">Print report</button></div><div class="metric-grid"><div><small>TOTAL COINS</small><b id="metric-total">0</b></div><div><small>TUBED</small><b id="metric-tubed">0</b></div><div><small>HELD ASIDE</small><b id="metric-held">0</b></div><div><small>ESTIMATED VALUE</small><b id="metric-value">$0.00–$0.00</b></div></div><div class="report-grid"><article><h3>By denomination</h3><div class="table-wrap"><table><thead><tr><th>Coin</th><th>Total</th><th>Tubed</th><th>Held</th><th>Value</th></tr></thead><tbody id="denomination-report"></tbody></table></div></article><article><h3>Grade distribution</h3><div id="grade-report" class="grade-report"></div></article></div><article class="hold-report"><h3>Hold for inspection</h3><div id="hold-report"></div></article></section>
     <section class="collection card"><div class="title-row"><div><small>MY COLLECTION</small><h2>Recent scans</h2></div><span id="count" class="pill">0 coins</span></div><div id="history" class="history"></div></section>
   </main>
   <script src="/static/app.js"></script>
 </body>
 </html>
-
